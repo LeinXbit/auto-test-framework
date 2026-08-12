@@ -2,7 +2,7 @@ base_url: "https://api.example.com"
 
 database:
   host: "prod-db.example.com"
-  port: 3306
+  port: 3307
   user: "prod_user"
   password: "${DB_PASSWORD}"
   database: "prod_db"
