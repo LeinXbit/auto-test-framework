@@ -1,0 +1,64 @@
+import os
+import  yaml
+from pathlib import Path
+
+
+
+class Settings:
+    """
+    配置管理类：
+        -根据环境变量 TEST_ENV 加载对应的 YAML 配置文件
+        -支持用点号访问嵌套配置
+    """
+
+    def __init__(self):
+        # 从环境变量读取当前环境，默认是 test
+        self.env = os.getenv("TEST_ENV", "test")
+
+        # 定位配置文件路径
+        config_dir = Path(__file__).parent / "environments"
+        config_file = config_dir / f"{self.env}.yaml"
+
+        # 如果文件不存在，直接报错，防止静默使用错误配置
+        if not config_file.exists():
+            raise FileNotFoundError(
+                f"配置文件不存在: {config_file}\n"
+                f"请确认环境变量 TEST_ENV={self.env} 是否正确，或创建该配置环境"
+            )
+
+        # 读取 YAML
+        with open(config_file, "r", encoding="utf-8") as f:
+            self.config = yaml.safe_load(f)
+
+    def get(self, key, default=None):
+        """
+        根据点号路径获取配置值
+        :param key:
+        :param default:
+        :return:
+        """
+        keys = key.split(".")
+        value = self.config
+
+        for k in keys:
+            if isinstance(value, dict) and k in value:
+                value = value[k]
+            else:
+                return default
+
+        return value
+
+    @property
+    def base_url(self):
+        return self.get("base_url")
+
+    @property
+    def db_config(self):
+        return self.get("database")
+
+    @property
+    def timeout(self):
+        return self.get("timeout", 10)
+
+# 全局单例，整个项目只创建一个 Settings 实例
+settings = Settings()
