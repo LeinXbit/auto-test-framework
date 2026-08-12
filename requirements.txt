@@ -1,0 +1,6 @@
+pytest
+pytest-rerunfailures
+allure-pytest
+requests
+PyYAML
+PyMySQL
