@@ -1,6 +1,5 @@
 import json
 import requests
-from selenium.webdriver.common.devtools.v85.target import activate_target
 
 from utils.exceptions import APIException
 

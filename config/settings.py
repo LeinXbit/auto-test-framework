@@ -54,7 +54,15 @@ class Settings:
 
     @property
     def db_config(self):
-        return self.get("database")
+        """支持环境变量覆盖数据库配置（Docker 场景）"""
+        base_config = self.get("database", {})
+        return {
+            "host": os.getenv("DB_HOST", base_config.get("host", "127.0.0.1")),
+            "port": int(os.getenv("DB_PORT", base_config.get("port", 3306))),
+            "user": base_config.get("user", "root"),
+            "password": base_config.get("password", ""),
+            "database": base_config.get("database", "test_db"),
+        }
 
     @property
     def timeout(self):
