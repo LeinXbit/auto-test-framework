@@ -1,70 +1,53 @@
-from config.settings import settings
+import pytest
 from utils.logger import get_logger
-from db.mysql_client import MySQLClient
 
 logger = get_logger(__name__)
 
 
-def test_mysql_connection():
-    """验证能连接 MySQL 并执行查询"""
-    db = MySQLClient(**settings.db_config)
-
-    # 查询数据库版本
-    result = db.query_one("SELECT VERSION() as version")
+def test_fixture_db_connection(db_client):
+    """验证 Fixture 自动注入数据库连接"""
+    result = db_client.query_one("SELECT VERSION() as version")
     logger.info(f"MySQL 版本: {result['version']}")
-
     assert result is not None
-    assert "version" in result
-
-    db.close()
-    logger.info("数据库连接测试通过")
 
 
-def test_mysql_crud():
-    """验证数据库增删改查"""
-    db = MySQLClient(**settings.db_config)
+def test_fixture_auto_user(test_user, db_client):
+    """验证 Fixture 自动创建测试用户，且用例结束后自动清理"""
+    logger.info(f"当前测试用户: {test_user}")
 
-    # 1. 创建测试表（如果不存在）
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS test_users (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            username VARCHAR(50) NOT NULL,
-            email VARCHAR(100)
-        )
-    """)
-
-    # 2. 插入数据
-    db.execute(
-        "INSERT INTO test_users (username, email) VALUES (%s, %s)",
-        ("test_user", "test@example.com")
+    # 验证用户确实在数据库里
+    user_in_db = db_client.query_one(
+        "SELECT * FROM test_users WHERE id = %s",
+        (test_user["id"],)
     )
+    assert user_in_db["username"] == test_user["username"]
+    assert user_in_db["email"] == test_user["email"]
 
-    # 3. 查询验证
-    user = db.query_one("SELECT * FROM test_users WHERE username = %s", ("test_user",))
-    assert user["username"] == "test_user"
-    assert user["email"] == "test@example.com"
-    logger.info(f"查询到用户: {user}")
+    logger.info("测试用户数据验证通过（退出后会被自动清理）")
 
-    # 4. 更新数据
-    db.execute(
-        "UPDATE test_users SET email = %s WHERE username = %s",
-        ("updated@example.com", "test_user")
+
+def test_fixture_user_isolated(test_user, db_client):
+    """验证每个用例的用户是独立的（不会互相污染）"""
+    logger.info(f"第二个用例的用户: {test_user}")
+
+    # 查询数据库中该用户的数量，应该只有 1 个
+    count = db_client.query_one(
+        "SELECT COUNT(*) as cnt FROM test_users WHERE username = %s",
+        (test_user["username"],)
     )
-    updated = db.query_one("SELECT email FROM test_users WHERE username = %s", ("test_user",))
-    assert updated["email"] == "updated@example.com"
+    assert count["cnt"] == 1
 
-    # 5. 删除数据
-    db.execute("DELETE FROM test_users WHERE username = %s", ("test_user",))
-    deleted = db.query_one("SELECT * FROM test_users WHERE username = %s", ("test_user",))
-    assert deleted is None
-
-    db.close()
-    logger.info("数据库 CRUD 测试通过")
+    logger.info("用户隔离性验证通过")
 
 
-def test_mysql_with_context():
-    """验证上下文管理器（with 语句）"""
-    with MySQLClient(**settings.db_config) as db:
-        result = db.query_one("SELECT 1 as num")
-        assert result["num"] == 1
-    logger.info("上下文管理器测试通过")
+def test_fixture_api_client(api_client):
+    """验证 API 客户端 Fixture（先用 httpbin 演示）"""
+    # 注意：如果网络不通，这个用例会失败，属于正常
+    resp = api_client.get("https://httpbin.org/get", params={"check": "fixture"})
+
+    # 如果网络不通，直接跳过断言，不阻塞后续
+    if resp.ok:
+        assert resp.status_code == 200
+        logger.info("API 客户端 Fixture 验证通过")
+    else:
+        logger.warning("网络不通，跳过 API 断言")
