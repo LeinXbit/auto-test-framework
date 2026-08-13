@@ -1,0 +1,46 @@
+# 用户注册场景测试数据
+register_cases:
+  - case_id: "REG_001"
+    case_name: "正常注册"
+    username: "normal_user"
+    password: "Pass123!"
+    email: "normal@test.com"
+    expected_status: 201
+    expected_code: 0
+    description: "使用合法参数注册，期望成功"
+
+  - case_id: "REG_002"
+    case_name: "用户名重复"
+    username: "existing_user"
+    password: "Pass123!"
+    email: "dup@test.com"
+    expected_status: 409
+    expected_code: 1001
+    description: "用户名已存在，期望返回冲突"
+
+  - case_id: "REG_003"
+    case_name: "密码太短"
+    username: "short_pass"
+    password: "123"
+    email: "short@test.com"
+    expected_status: 400
+    expected_code: 1002
+    description: "密码长度不足6位，期望参数校验失败"
+
+  - case_id: "REG_004"
+    case_name: "邮箱格式错误"
+    username: "bad_email"
+    password: "Pass123!"
+    email: "not-an-email"
+    expected_status: 400
+    expected_code: 1003
+    description: "邮箱格式不合法，期望参数校验失败"
+
+  - case_id: "REG_005"
+    case_name: "用户名空值"
+    username: ""
+    password: "Pass123!"
+    email: "empty@test.com"
+    expected_status: 400
+    expected_code: 1004
+    description: "用户名为空，期望参数校验失败"

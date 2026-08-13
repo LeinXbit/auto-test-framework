@@ -1,4 +1,5 @@
 import allure
+import yaml
 import pytest
 from utils.logger import get_logger
 
@@ -113,3 +114,74 @@ def test_user_api_register_mock(user_api, monkeypatch):
         allure.attach(str(captured['json']), "请求体JSON")
 
     logger.info(" UserApi Mock 测试通过")
+
+# 数据驱动测试
+def load_yaml_data(file_name):
+    """ 加载 YAML 测试数据 """
+    data_path = __import__("pathlib").Path(__file__).parent.parent/"data" / file_name
+    with open(data_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+@allure.feature("数据驱动测试")
+@allure.story("用户注册参数化")
+class TestDataDriven:
+    # 从 YAML 加载数据
+    test_data = load_yaml_data("test_data.yaml")
+    register_cases = test_data["register_cases"]
+
+    @allure.title("{case[case_name]}")
+    @pytest.mark.parametrize("case", register_cases, ids=[c["case_id"] for c in register_cases])
+    @pytest.mark.regression
+    def test_register_data_driven(self, case, user_api, monkeypatch):
+        """
+        数据驱动：批量验证用户注册的各种场景
+        使用 monkeypatch Mock，不依赖真实服务
+        """
+        with allure.step(f"前置：准备Mock - {case['description']}"):
+            captured = {}
+
+            def mock_post(url, **kwargs):
+                captured["url"] = url
+                captured["json"] = kwargs.get("json")
+
+                class MockResponse:
+                    def __init__(self, status):
+                        self.status_code = status
+
+                    def json(self):
+                        # 模拟不同返回
+                        if self.status_code == 201:
+                            return {"code": 0, "data": {"id": 1}}
+                        else:
+                            return {"code": case["expected_code"], "message": case["case_name"]}
+
+                return MockResponse(case["expected_status"])
+
+        monkeypatch.setattr(user_api, "post", mock_post)
+        allure.attach(str(case), f"测试数据 [{case['case_id']}]")
+
+        with allure.step("执行：调用register业务方法"):
+            resp = user_api.register(
+                case["username"],
+                case["password"],
+                case["email"]
+            )
+
+        with allure.step("断言：验证响应符合预期"):
+            assert resp.status_code == case["expected_status"]
+            if resp.status_code != 201:
+                assert resp.json()["code"] == case["expected_code"]
+
+            allure.attach(
+                f"状态码: {resp.status_code}\n预期: {case['expected_status']}",
+                "断言结果"
+            )
+
+        with allure.step("验证：确认请求参数构造正确"):
+            assert captured["json"]["username"] == case["username"]
+            assert captured["json"]["password"] == case["password"]
+            assert captured["json"]["email"] == case["email"]
+            allure.attach(str(captured["json"]), "实际请求参数")
+
+        logger.info(f"[{case['case_id']}] {case['case_name']} 验证通过")
