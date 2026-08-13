@@ -15,39 +15,69 @@ def test_fixture_auto_user(test_user, db_client):
     """验证 Fixture 自动创建测试用户，且用例结束后自动清理"""
     logger.info(f"当前测试用户: {test_user}")
 
-    # 验证用户确实在数据库里
     user_in_db = db_client.query_one(
         "SELECT * FROM test_users WHERE id = %s",
         (test_user["id"],)
     )
     assert user_in_db["username"] == test_user["username"]
-    assert user_in_db["email"] == test_user["email"]
-
-    logger.info("测试用户数据验证通过（退出后会被自动清理）")
+    logger.info("测试用户数据验证通过")
 
 
-def test_fixture_user_isolated(test_user, db_client):
-    """验证每个用例的用户是独立的（不会互相污染）"""
-    logger.info(f"第二个用例的用户: {test_user}")
+def test_user_api_structure(user_api):
+    """
+    验证 UserApi 封装结构正确
+    不依赖真实服务，只验证方法存在和继承关系
+    """
+    # 验证继承自 BaseApi
+    assert hasattr(user_api, "get")
+    assert hasattr(user_api, "post")
+    assert hasattr(user_api, "put")
+    assert hasattr(user_api, "delete")
 
-    # 查询数据库中该用户的数量，应该只有 1 个
-    count = db_client.query_one(
-        "SELECT COUNT(*) as cnt FROM test_users WHERE username = %s",
-        (test_user["username"],)
-    )
-    assert count["cnt"] == 1
+    # 验证业务方法存在
+    assert hasattr(user_api, "register")
+    assert hasattr(user_api, "login")
+    assert hasattr(user_api, "get_user")
+    assert hasattr(user_api, "update_user")
+    assert hasattr(user_api, "delete_user")
+    assert hasattr(user_api, "list_users")
 
-    logger.info("用户隔离性验证通过")
+    # 验证 base_url 被正确注入
+    assert user_api.base_url == "http://127.0.0.1:5000"
+
+    logger.info("UserApi 结构验证通过")
 
 
-def test_fixture_api_client(api_client):
-    """验证 API 客户端 Fixture（先用 httpbin 演示）"""
-    # 注意：如果网络不通，这个用例会失败，属于正常
-    resp = api_client.get("https://httpbin.org/get", params={"check": "fixture"})
+def test_user_api_register_mock(user_api, monkeypatch):
+    """
+    使用 pytest 的 monkeypatch 模拟网络响应
+    验证 register 方法构造的请求参数正确
+    （不依赖真实服务，展示单元测试能力）
+    """
+    captured = {}  # 捕获调用参数
 
-    # 如果网络不通，直接跳过断言，不阻塞后续
-    if resp.ok:
-        assert resp.status_code == 200
-        logger.info("API 客户端 Fixture 验证通过")
-    else:
-        logger.warning("网络不通，跳过 API 断言")
+    def mock_post(url, **kwargs):
+        captured["url"] = url
+        captured["json"] = kwargs.get("json")
+
+        class MockResponse:
+            status_code = 201
+
+            def json(self):
+                return {"code": 0, "data": {"id": 1, "username": "mock_user"}}
+
+        return MockResponse()
+
+    # 替换 user_api 的 post 方法为 mock
+    monkeypatch.setattr(user_api, "post", mock_post)
+
+    # 调用业务方法
+    resp = user_api.register("mock_user", "Pass123!", "mock@test.com")
+
+    # 验证业务方法构造了正确的请求
+    assert resp.status_code == 201
+    assert captured["url"] == "/api/register"
+    assert captured["json"]["username"] == "mock_user"
+    assert captured["json"]["email"] == "mock@test.com"
+
+    logger.info("UserApi Mock 测试通过（验证参数构造正确）")

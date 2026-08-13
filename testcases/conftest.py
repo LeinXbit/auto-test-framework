@@ -1,7 +1,7 @@
 import pytest
 import uuid
 
-
+from api.user_api import UserApi
 from config.settings import settings
 from utils.logger import get_logger
 from api.base_api import BaseApi
@@ -79,3 +79,15 @@ def init_database():
         """)
     yield
     logger.info("[Session Fixture]测试会话结束")
+
+# 业务系统 API Fixture
+@pytest.fixture(scope="function")
+def user_api():
+    """
+    每个测试用例自动获得一个 UserApi 实例
+    自动继承 BaseApi 的日志、异常处理、Token注入能力
+    """
+    logger.info("[Fixture] 创建 UserApi 业务客户端")
+    api = UserApi(base_url=settings.base_url)
+    yield api
+    logger.info("[Fixture] UserApi 业务客户端已释放")
