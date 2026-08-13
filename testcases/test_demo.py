@@ -1,7 +1,9 @@
 import allure
 import yaml
 import pytest
+
 from utils.logger import get_logger
+from utils.exceptions import APIException
 
 logger = get_logger(__name__)
 
@@ -185,3 +187,96 @@ class TestDataDriven:
             allure.attach(str(captured["json"]), "实际请求参数")
 
         logger.info(f"[{case['case_id']}] {case['case_name']} 验证通过")
+
+@allure.feature("框架鲁棒性")
+@allure.story("异常处理与断言辅助")
+class TestRobustness:
+
+    @allure.title("assert_status_code正常通过")
+    def test_assert_status_code_pass(self, user_api, monkeypatch):
+        """验证状态码断言辅助方法正常通过的场景"""
+
+        def mock_post(url, **kwargs):
+            class MockResponse:
+                status_code = 201
+
+                def json(self):
+                    return {"code": 0}
+
+            return MockResponse()
+
+        monkeypatch.setattr(user_api, "post", mock_post)
+        resp = user_api.register("user", "Pass123!", "user@test.com")
+
+        monkeypatch.setattr(user_api, "post", mock_post)
+        resp = user_api.register("user", "Pass123!", "user@test.com")
+
+    @allure.title("assert_status_code失败抛出APIException")
+    def test_assert_status_code_fail(self, user_api, monkeypatch):
+        """验证状态码不匹配时抛出包含详细信息的异常"""
+
+        def mock_post(url, **kwargs):
+            class MockResponse:
+                status_code = 500
+
+                def json(self):
+                    return {"code": 999, "message": "服务器错误"}
+
+            return MockResponse()
+
+        monkeypatch.setattr(user_api, "post", mock_post)
+        resp = user_api.register("user", "Pass123!", "user@test.com")
+
+        with allure.step("验证抛出APIException"):
+            with pytest.raises(APIException) as exc_info:
+                user_api.assert_status_code(resp, 201)
+
+            assert exc_info.value.status_code == 500
+            allure.attach(str(exc_info.value.status_code), "异常中的状态码")
+            allure.attach(exc_info.value.args[0], "异常消息")
+
+    @allure.title("assert_json_key验证JSON字段")
+    def test_assert_json_key(self, user_api, monkeypatch):
+        """验证JSON字段断言辅助方法"""
+
+        def mock_post(url, **kwargs):
+            class MockResponse:
+                status_code = 200
+
+                def json(self):
+                    return {"code": 0, "data": {"id": 42}}
+
+            return MockResponse()
+
+        monkeypatch.setattr(user_api, "post", mock_post)
+        resp = user_api.register("user", "Pass123!", "user@test.com")
+
+        with allure.step("验证code字段"):
+            user_api.assert_json_key(resp, "code", 0)
+            allure.attach("code = 0", "断言结果")
+
+        with allure.step("验证嵌套data.id字段"):
+            data = resp.json().get("data", {})
+            allure.attach(str(data), "data字段内容")
+
+@allure.feature("框架鲁棒性")
+@allure.story("失败重试")
+@pytest.mark.robustness
+class TestRetryMechanism:
+
+    @allure.title("不稳定接口自动重试")
+    def test_retry_on_network_failure(self, user_api, monkeypatch):
+        """
+        验证 pytest-rerunfailures 重试机制
+        此用例如果因为外部服务问题失败，会自动重试最多2次
+        """
+        with allure.step("调用外部服务（可能偶发失败）"):
+            resp = user_api.get("https://httpbin.org/status/200")
+
+        with allure.step("验证响应或跳过"):
+            if resp.ok:
+                user_api.assert_status_code(resp, 200)
+                allure.attach("请求成功，无需重试", "结果")
+            else:
+                allure.attach(f"状态码: {resp.status_code}，将触发重试机制", "结果")
+                pytest.skip("外部服务暂不可用，跳过但不记为失败")

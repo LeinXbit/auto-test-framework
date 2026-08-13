@@ -1,5 +1,8 @@
 import json
 import requests
+from selenium.webdriver.common.devtools.v85.target import activate_target
+
+from utils.exceptions import APIException
 
 from utils.logger import get_logger
 
@@ -66,14 +69,17 @@ class BaseApi:
             return response
 
         except requests.exceptions.Timeout:
-            logger.error(f"请求超时: {method} {full_url}")
-            raise
+            msg = f"请求超时: {method} {full_url}"
+            logger.error(msg)
+            raise APIException(msg)
         except requests.exceptions.ConnectionError:
-            logger.error(f"连接失败: {method} {full_url}")
-            raise
+            msg = f"连接失败: {method} {full_url}"
+            logger.error(msg)
+            raise APIException(msg)
         except Exception as e:
-            logger.error(f"请求异常: {method} {full_url} | {str(e)}")
-            raise
+            msg = f"请求异常: {method} {full_url} | {str(e)}"
+            logger.error(msg)
+            raise APIException
 
     # 便捷方法
     def get(self, url, **kwargs):
@@ -87,3 +93,36 @@ class BaseApi:
 
     def delete(self, url, **kwargs):
         return self.request("DELETE", url, **kwargs)
+
+    # 断言辅助方法
+    def assert_status_code(self, response, expected):
+        """
+        断言 HTTP 状态码，失败时抛出 APIException 并附带响应
+        返回self支持链式调用: api.assert_status_code(resp, 200).assert_json_key(resp, "code", 0)
+        :param response:
+        :param expected:
+        :return:
+        """
+        actual = response.status_code
+        if actual != expected:
+            msg = f"状态码断言失败: 预期 {expected}, 实际 {actual}"
+            logger.error(msg)
+            raise APIException(msg, actual, response)
+        logger.info(f"状态码断言通过: {actual}")
+        return self
+
+    def assert_json_key(self, response, key, expected_value):
+        """ 断言JSON响应中的指定字段 """
+        try:
+            data = response.json()
+        except Exception as e:
+            raise APIException(f"响应不是合法JSON: {str(e)}", response.status_code, response)
+
+        actual = data.get(key)
+        if actual != expected_value:
+            msg = f"JSON断言失败: '{key}' 预期 {expected_value}, 实际 {actual}"
+            logger.error(msg)
+            raise APIException(msg, response.status_code, response)
+
+        logger.info(f"JSON断言通过: {key} = {actual}")
+        return self
