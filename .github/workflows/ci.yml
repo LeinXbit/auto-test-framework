@@ -1,0 +1,82 @@
+name: Auto Test CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # GitHub Actions 内置 MySQL 服务，无需 Docker Compose
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: 123456
+          MYSQL_DATABASE: test_db
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 设置 Python 3.11
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. 安装依赖
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. 等待 MySQL 就绪
+      - name: Wait for MySQL
+        run: |
+          sudo apt-get install -y mysql-client
+          while ! mysqladmin ping -h 127.0.0.1 -P 3307 --silent; do
+            sleep 1
+          done
+
+      # 5. 运行测试（生成 Allure 原始数据）
+      - name: Run tests
+        run: pytest --alluredir=reports/allure-results
+
+      # 6. 上传 Allure 结果（作为 Artifact 下载）
+      - name: Upload Allure results
+        uses: actions/upload-artifact@v4
+        if: always()  # 即使测试失败也上传，方便排查
+        with:
+          name: allure-results
+          path: reports/allure-results
+
+      # 7. 生成 Allure HTML 报告
+      - name: Generate Allure Report
+        uses: simple-elf/allure-report-action@master
+        if: always()
+        with:
+          allure_results: reports/allure-results
+          allure_history: allure-history
+          keep_reports: 20
+
+      # 8. 部署到 GitHub Pages（需要提前开启 Pages）
+      - name: Deploy to GitHub Pages
+        if: always()
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: allure-history
+
+
