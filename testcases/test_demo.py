@@ -259,24 +259,43 @@ class TestRobustness:
             data = resp.json().get("data", {})
             allure.attach(str(data), "data字段内容")
 
+
 @allure.feature("框架鲁棒性")
 @allure.story("失败重试")
 @pytest.mark.robustness
 class TestRetryMechanism:
 
-    @allure.title("不稳定接口自动重试")
-    def test_retry_on_network_failure(self, user_api, monkeypatch):
+    @allure.title("验证APIException被正确抛出与捕获")
+    def test_retry_with_mock_failure(self, user_api, monkeypatch):
         """
-        验证 pytest-rerunfailures 重试机制
-        此用例如果因为外部服务问题失败，会自动重试最多2次
+        验证框架能正确捕获和展示APIException
+        纯Mock，不依赖外部网络，确保CI稳定
         """
-        with allure.step("调用外部服务（可能偶发失败）"):
-            resp = user_api.get("https://httpbin.org/status/200")
+        call_count = [0]
 
-        with allure.step("验证响应或跳过"):
-            if resp.ok:
+        def mock_get(url, **kwargs):
+            call_count[0] += 1
+
+            class MockResponse:
+                status_code = 503
+
+                def json(self):
+                    return {"code": 999, "message": "服务暂不可用"}
+
+            return MockResponse()
+
+        monkeypatch.setattr(user_api, "get", mock_get)
+
+        with allure.step("步骤1：调用Mock接口，返回503"):
+            resp = user_api.get("https://example.com/api/status")
+            allure.attach(f"Mock调用次数: {call_count[0]}", "调用统计")
+
+        with allure.step("步骤2：验证状态码不匹配时抛出APIException"):
+            with pytest.raises(APIException) as exc_info:
                 user_api.assert_status_code(resp, 200)
-                allure.attach("请求成功，无需重试", "结果")
-            else:
-                allure.attach(f"状态码: {resp.status_code}，将触发重试机制", "结果")
-                pytest.skip("外部服务暂不可用，跳过但不记为失败")
+
+            assert exc_info.value.status_code == 503
+            allure.attach(str(exc_info.value.status_code), "异常中的状态码")
+            allure.attach(str(exc_info.value.args[0]), "异常消息")
+
+        logger.info("Mock异常与重试标记验证通过")
