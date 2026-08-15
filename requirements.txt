@@ -4,3 +4,4 @@ allure-pytest
 requests
 PyYAML
 PyMySQL
+ddddocr
