@@ -19,3 +19,20 @@ reports/
 # Logs
 logs/
 *.log
+
+# 本地依赖目录（pip --target 安装到 .vendor/，避免污染系统 Python）
+# 重装命令见 README，不在仓库中托管二进制依赖
+.vendor/
+
+# 本地临时调试脚本/中间文件（不提交）
+.check_deps.py
+.verify_captcha.py
+.req_*.json
+
+# ============================================================
+# 以下文件需要上传，请勿在此处忽略：
+#   - .swagger_doc.json    本地 GVA swagger 接口文档快照
+#   - pytest.ini           Pytest 配置
+#   - requirements.txt     Python 依赖清单
+#   - config/environments/*.yaml  环境配置（不含密钥时上传）
+# ============================================================

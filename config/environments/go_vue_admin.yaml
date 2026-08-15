@@ -1,0 +1,24 @@
+# gin-vue-admin 本地真实业务环境配置
+base_url: "http://127.0.0.1:8888"
+
+# GVA 默认使用 gva 库
+database:
+  host: "127.0.0.1"
+  port: 3306
+  user: "root"
+  password: "123456"
+  database: "gva"
+  charset: "utf8mb4"
+
+timeout: 10
+
+# 管理员账号（用于 fixture 自动登录）
+admin:
+  username: "admin"
+  password: "123456"
+
+# 验证码识别配置（GVA 强制开启验证码，用 ddddocr 自动识别）
+captcha:
+  solver: "ddddocr"
+  max_retry: 5
+  expected_length: 6

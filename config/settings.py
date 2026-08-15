@@ -12,8 +12,8 @@ class Settings:
     """
 
     def __init__(self):
-        # 从环境变量读取当前环境，默认是 test
-        self.env = os.getenv("TEST_ENV", "test")
+        # 默认对接本地 gin-vue-admin 真实业务
+        self.env = os.getenv("TEST_ENV", "go_vue_admin")
 
         # 定位配置文件路径
         config_dir = Path(__file__).parent / "environments"
@@ -67,6 +67,23 @@ class Settings:
     @property
     def timeout(self):
         return self.get("timeout", 10)
+
+    @property
+    def admin_account(self):
+        """GVA 管理员账号（用于 fixture 自动登录）"""
+        return self.get("admin", {}) or {
+            "username": "admin",
+            "password": "123456",
+        }
+
+    @property
+    def captcha_config(self):
+        """验证码识别配置"""
+        return self.get("captcha", {}) or {
+            "solver": "ddddocr",
+            "max_retry": 5,
+            "expected_length": 6,
+        }
 
 # 全局单例，整个项目只创建一个 Settings 实例
 settings = Settings()
