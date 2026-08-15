@@ -111,8 +111,9 @@ def db_client():
 def temp_user(user_api, db_client):
     """
     通过 GVA 真实注册接口创建临时用户，测试结束自动删除
-    业务接口失败时数据库兜底清理，确保数据不污染
-    :return: 用户对象 dict（含 ID 等真实字段）
+    admin_register 接口直接返回 data.user（含 ID），无需再查列表
+    清理时业务接口失败立即用 DB 兜底（GVA deleteUser 接口对部分角色组合会权限不足）
+    :return: 用户对象 dict（含 ID/userName/authorityId 等真实字段）
     """
     username = f"auto_{uuid.uuid4().hex[:8]}"
     password = "Test1234!"
@@ -127,21 +128,33 @@ def temp_user(user_api, db_client):
             resp.status_code,
             resp,
         )
-    # 从用户列表查询真实 ID（admin_register 接口不直接返回 ID）
-    list_resp = user_api.get_user_list(page=1, page_size=100, keyword=username)
-    users = list_resp.json().get("data", {}).get("list", [])
-    if not users:
-        raise APIException(f"无法从用户列表查到测试用户: {username}")
-    user = users[0]
+    # admin_register 直接返回 data.user 对象（含 ID 等字段）
+    user = resp.json()["data"]["user"]
     logger.info(f"[Fixture] 已创建临时用户: {username} (ID={user.get('ID')})")
     yield user
-    # 清理
+    # 清理：先试业务接口，失败立即用 DB 兜底
     try:
-        user_api.delete_user(user["ID"])
-        logger.info(f"[Fixture] 已删除临时用户: {username}")
+        del_resp = user_api.delete_user(user["ID"])
+        if del_resp.json().get("code") == 0:
+            logger.info(f"[Fixture] 已删除临时用户: {username}")
+        else:
+            logger.warning(f"[Fixture] 业务删除返回非0: {del_resp.json()}, 用 DB 兜底")
+            db_client.execute(
+                "DELETE FROM sys_user_authority WHERE sys_user_id = %s",
+                (user["ID"],),
+            )
+            db_client.execute(
+                "DELETE FROM sys_users WHERE id = %s",
+                (user["ID"],),
+            )
     except Exception as e:
-        logger.warning(f"[Fixture] 业务接口删除失败，数据库兜底: {e}")
+        logger.warning(f"[Fixture] 业务接口删除异常，DB 兜底: {e}")
         db_client.execute(
-            "DELETE FROM sys_users WHERE user_name = %s",
-            (username,),
+            "DELETE FROM sys_user_authority WHERE sys_user_id = %s",
+            (user["ID"],),
         )
+        db_client.execute(
+            "DELETE FROM sys_users WHERE id = %s",
+            (user["ID"],),
+        )
+
