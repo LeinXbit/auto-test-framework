@@ -6,10 +6,10 @@ from pathlib import Path
 
 def _load_env_file(env_path):
     """
-    极简 .env 加载器(零外部依赖):
-        - 解析 KEY=VALUE, 跳过空行/注释(#)
-        - 已存在的环境变量不被覆盖(CI secrets 优先级最高)
-        - 不支持引号/转义等复杂语法, 保持简单
+    Minimal .env loader (zero external deps):
+        - Parses KEY=VALUE, skips blank lines and comments (#)
+        - Existing env vars are not overridden (CI secrets take precedence)
+        - No quotes/escaping; kept intentionally simple
     """
     env_path = Path(env_path)
     if not env_path.exists():
@@ -27,37 +27,38 @@ def _load_env_file(env_path):
 
 class Settings:
     """
-    配置管理类：
-        - 启动时加载 .env(若存在), 敏感配置优先读环境变量
-        - 根据环境变量 TEST_ENV 加载对应的 YAML 配置文件
-        - 支持用点号访问嵌套配置
+    Config manager:
+        - Loads .env on startup (if present); sensitive config prefers env vars
+        - Loads the YAML config file matching TEST_ENV
+        - Supports dot-path access to nested config
     """
 
     def __init__(self):
-        # 加载 .env(已 gitignore), 不存在则跳过, 不影响 CI 用 secrets 注入
+        # Load .env (gitignored); skip if missing so CI secrets still work
         _load_env_file(Path(__file__).resolve().parent.parent / ".env")
 
-        # 默认对接本地 gin-vue-admin 真实业务
+        # Default to local gin-vue-admin real business
         self.env = os.getenv("TEST_ENV", "go_vue_admin")
 
-        # 定位配置文件路径
+        # Locate the config file
         config_dir = Path(__file__).parent / "environments"
-        config_file = config_dir / f"{self.env}.yaml"
+        config_file = config_dir / "{}.yaml".format(self.env)
 
-        # 如果文件不存在，直接报错，防止静默使用错误配置
+        # Fail fast if missing, to avoid silently using the wrong config
         if not config_file.exists():
             raise FileNotFoundError(
-                f"配置文件不存在: {config_file}\n"
-                f"请确认环境变量 TEST_ENV={self.env} 是否正确，或创建该配置环境"
+                "配置文件不存在: {}\n请确认环境变量 TEST_ENV={} 是否正确, 或创建该配置环境".format(
+                    config_file, self.env
+                )
             )
 
-        # 读取 YAML
+        # Read YAML
         with open(config_file, "r", encoding="utf-8") as f:
             self.config = yaml.safe_load(f)
 
     def get(self, key, default=None):
         """
-        根据点号路径获取配置值
+        Get config value by dot path
         :param key:
         :param default:
         :return:
@@ -80,9 +81,9 @@ class Settings:
     @property
     def db_config(self):
         """
-        支持环境变量覆盖数据库配置(Docker/CI 场景)
-        优先级: 环境变量 > YAML > 内置默认
-        密码仅从环境变量读取, 不落 YAML, 避免明文入库
+        Supports env-var overrides for DB config (Docker / CI scenarios).
+        Priority: env var > YAML > built-in default.
+        Password is read only from env vars, never stored in YAML.
         """
         base_config = self.get("database", {})
         return {
@@ -99,8 +100,8 @@ class Settings:
 
     @property
     def admin_account(self):
-        """GVA 管理员账号（用于 fixture 自动登录）
-        优先环境变量, 密码不落 YAML
+        """GVA admin account (used by fixtures for auto login)
+        Prefers env vars; password is never stored in YAML
         """
         return {
             "username": os.getenv("ADMIN_USERNAME", "admin"),
@@ -109,12 +110,12 @@ class Settings:
 
     @property
     def captcha_config(self):
-        """验证码识别配置"""
+        """Captcha recognition config"""
         return self.get("captcha", {}) or {
             "solver": "ddddocr",
             "max_retry": 5,
             "expected_length": 6,
         }
 
-# 全局单例，整个项目只创建一个 Settings 实例
+# Global singleton; only one Settings instance for the whole project
 settings = Settings()

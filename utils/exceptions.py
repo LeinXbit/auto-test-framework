@@ -5,7 +5,7 @@ class FrameworkException(Exception):
 class APIException(FrameworkException):
     """
     接口请求异常
-    包含状态码和响应对象，方便定位问题
+    包含状态码和响应对象, 方便定位问题
     """
     def __init__(self, message="", status_code=None, response=None):
         super().__init__(message)

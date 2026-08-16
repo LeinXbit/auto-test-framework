@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 GVA 用户模块 CRUD 真实测试
-覆盖：注册 → 列表查询 → 角色变更 → 密码修改 → 删除（含数据库断言）
-数据隔离：所有写操作基于 temp_user fixture，测试结束自动清理
+覆盖: 注册 → 列表查询 → 角色变更 → 密码修改 → 删除(含数据库断言)
+数据隔离: 所有写操作基于 temp_user fixture, 测试结束自动清理
 
-注意：以下断言基于 GVA 真实业务行为（探针验证过）：
-1. admin_register 成功返回 data.user 对象（含 ID），失败 msg="注册失败"
-2. getUserList 的 keyword 参数实际无效（传任何值都返回全表），故只断言"目标在列表中"
-3. setUserAuthority 改的是关联表 sys_user_authority，主表 authority_id 字段不变
-4. changePassword 路由是 POST（非 PUT），且校验 token 持有者密码
-5. deleteUser 对部分角色组合返回"权限不足"，由 fixture DB 兜底
+注意: 以下断言基于 GVA 真实业务行为(探针验证过):
+1. admin_register 成功返回 data.user 对象(含 ID), 失败 msg="注册失败"
+2. getUserList 的 keyword 参数实际无效(传任何值都返回全表), 故只断言"目标在列表中"
+3. setUserAuthority 改的是关联表 sys_user_authority, 主表 authority_id 字段不变
+4. changePassword 路由是 POST(非 PUT), 且校验 token 持有者密码
+5. deleteUser 对部分角色组合返回"权限不足", 由 fixture DB 兜底
 """
 import allure
 import pytest
@@ -29,7 +29,7 @@ class TestUserCreate:
     @pytest.mark.api
     def test_register_returns_user_object(self, user_api, temp_user):
         """admin_register 成功应返回 data.user 含 ID/userName/authorityId 等字段"""
-        # temp_user fixture 已注册，直接断言其字段
+        # temp_user fixture 已注册, 直接断言其字段
         assert temp_user["ID"] > 0, "ID 应为正整数"
         assert temp_user["userName"].startswith("auto_"), "用户名前缀应为 auto_"
         assert temp_user["authorityId"] == 888, "默认角色应为普通用户(888)"
@@ -42,7 +42,7 @@ class TestUserCreate:
     @pytest.mark.regression
     @pytest.mark.api
     def test_register_then_list_contains_user(self, user_api, temp_user):
-        """注册后通过列表查询应能找到该用户（按 ID 匹配，因 keyword 实际无效）"""
+        """注册后通过列表查询应能找到该用户(按 ID 匹配, 因 keyword 实际无效)"""
         user_id = temp_user["ID"]
         username = temp_user["userName"]
         resp = user_api.get_user_list(page=1, page_size=100, keyword=username)
@@ -50,7 +50,7 @@ class TestUserCreate:
         users = resp.json()["data"]["list"]
         matched = [u for u in users if u["ID"] == user_id]
         assert matched, f"列表未查到刚注册的用户 ID={user_id}"
-        # 列表返回的字段比 admin_register 更完整（含 authority 对象）
+        # 列表返回的字段比 admin_register 更完整(含 authority 对象)
         u = matched[0]
         assert u["userName"] == username
         assert u["authorityId"] == 888
@@ -60,7 +60,7 @@ class TestUserCreate:
     @pytest.mark.regression
     @pytest.mark.database
     def test_register_db_persisted(self, db_client, temp_user):
-        """验证注册接口真正写入数据库（不只是 API 返回成功）"""
+        """验证注册接口真正写入数据库(不只是 API 返回成功)"""
         username = temp_user["userName"]
         row = db_client.query_one(
             "SELECT username, nick_name, authority_id, enable "
@@ -77,7 +77,7 @@ class TestUserCreate:
     @pytest.mark.regression
     @pytest.mark.api
     def test_register_duplicate_username(self, user_api, temp_user):
-        """同名重复注册应业务失败，GVA 返回 code=7, msg=注册失败"""
+        """同名重复注册应业务失败, GVA 返回 code=7, msg=注册失败"""
         username = temp_user["userName"]
         resp = user_api.admin_register(
             username=username,
@@ -115,8 +115,8 @@ class TestUserList:
     @pytest.mark.api
     def test_list_contains_new_user(self, user_api, temp_user):
         """
-        GVA getUserList 的 keyword 参数实际无效（探针验证：传任意值都返回全表）
-        此用例改为断言：新注册用户出现在列表里
+        GVA getUserList 的 keyword 参数实际无效(探针验证: 传任意值都返回全表)
+        此用例改为断言: 新注册用户出现在列表里
         """
         user_id = temp_user["ID"]
         resp = user_api.get_user_list(page=1, page_size=100, keyword="")
@@ -129,7 +129,7 @@ class TestUserList:
 @allure.feature("用户模块")
 @allure.story("角色变更")
 class TestUserAuthority:
-    """用户角色变更链路（setUserAuthority 改关联表，不改主表）"""
+    """用户角色变更链路(setUserAuthority 改关联表, 不改主表)"""
 
     @allure.title("setUserAuthority 接口返回修改成功")
     @allure.severity(allure.severity_level.CRITICAL)
@@ -149,11 +149,11 @@ class TestUserAuthority:
     @pytest.mark.database
     def test_authority_db_actual_behavior(self, user_api, db_client, temp_user):
         """
-        探针发现：GVA setUserAuthority 返回"修改成功"，但 DB 实际无变化
+        探针发现: GVA setUserAuthority 返回"修改成功", 但 DB 实际无变化
             - sys_users.authority_id 仍是原值(888)
             - sys_user_authority 表无对应记录
-        这是 GVA 后端的真实行为（接口返回与 DB 不一致），用例固化此行为作为回归基线
-        未来若 GVA 修复此 bug，本用例会失败，提示开发者更新期望
+        这是 GVA 后端的真实行为(接口返回与 DB 不一致), 用例固化此行为作为回归基线
+        未来若 GVA 修复此 bug, 本用例会失败, 提示开发者更新期望
         """
         user_id = temp_user["ID"]
         original_auth = db_client.query_one(
@@ -167,15 +167,15 @@ class TestUserAuthority:
         resp = user_api.set_user_authority(user_id, 9528)
         assert resp.json()["code"] == 0, f"接口应返回成功: {resp.json()}"
 
-        # DB 真实状态：GVA 此接口实际未修改 DB（已知行为）
+        # DB 真实状态: GVA 此接口实际未修改 DB(已知行为)
         after_auth = db_client.query_one(
             "SELECT authority_id FROM sys_users WHERE id = %s",
             (user_id,),
         )
         assert after_auth is not None, "改角色后用户应仍存在"
-        # 固化当前 GVA 行为：authority_id 不变
+        # 固化当前 GVA 行为: authority_id 不变
         assert int(after_auth["authority_id"]) == original_auth_id, \
-            f"当前 GVA 行为：setUserAuthority 不应改主表 authority_id, " \
+            f"当前 GVA 行为: setUserAuthority 不应改主表 authority_id, " \
             f"原值={original_auth_id}, 改后={after_auth['authority_id']}"
 
 
@@ -191,16 +191,16 @@ class TestUserDelete:
     @pytest.mark.api
     def test_delete_user_then_list_empty(self, user_api, temp_user):
         """
-        删除 temp_user 后，列表里不应再有该用户（按 ID 匹配）
-        注意：fixture teardown 会再删一次，已做 DB 兜底
+        删除 temp_user 后, 列表里不应再有该用户(按 ID 匹配)
+        注意: fixture teardown 会再删一次, 已做 DB 兜底
         """
         user_id = temp_user["ID"]
         resp = user_api.delete_user(user_id)
-        # GVA 对部分角色组合返回"权限不足"（code=7），属预期内的业务规则，
-        # 此用例只验证：当删除成功时列表里确实没了
+        # GVA 对部分角色组合返回"权限不足"(code=7), 属预期内的业务规则,
+        # 此用例只验证: 当删除成功时列表里确实没了
         if resp.json().get("code") != 0:
-            pytest.skip(f"GVA 业务规则限制删除（权限不足），跳过列表断言: {resp.json().get('msg')}")
-        # 删除成功，列表应查不到
+            pytest.skip(f"GVA 业务规则限制删除(权限不足), 跳过列表断言: {resp.json().get('msg')}")
+        # 删除成功, 列表应查不到
         list_resp = user_api.get_user_list(page=1, page_size=100, keyword="")
         users = list_resp.json()["data"]["list"]
         matched = [u for u in users if u["ID"] == user_id]
@@ -212,12 +212,12 @@ class TestUserDelete:
     @pytest.mark.database
     def test_delete_user_db_removed(self, db_client, temp_user):
         """
-        用 DB 直接 DELETE（绕过接口权限限制），验证 DB 清理后表记录消失
-        同时模拟"业务接口不可用，DB 兜底"的真实运维场景
+        用 DB 直接 DELETE(绕过接口权限限制), 验证 DB 清理后表记录消失
+        同时模拟"业务接口不可用, DB 兜底"的真实运维场景
         """
         user_id = temp_user["ID"]
         username = temp_user["userName"]
-        # DB 直接删除（关联表 + 主表）
+        # DB 直接删除(关联表 + 主表)
         db_client.execute(
             "DELETE FROM sys_user_authority WHERE sys_user_id = %s",
             (user_id,),
@@ -237,7 +237,7 @@ class TestUserDelete:
 @allure.feature("用户模块")
 @allure.story("修改密码")
 class TestChangePassword:
-    """修改密码链路（changePassword 校验 token 持有者密码）"""
+    """修改密码链路(changePassword 校验 token 持有者密码)"""
 
     @allure.title("用户改自己密码后能用新密码登录")
     @allure.severity(allure.severity_level.CRITICAL)
@@ -245,17 +245,17 @@ class TestChangePassword:
     @pytest.mark.api
     def test_change_own_password_then_login(self, user_api, captcha_solver, temp_user, admin_token):
         """
-        GVA changePassword 校验当前 token 持有者的密码，不能改别人密码
-        流程：
-            1. temp_user 是 admin 注册的临时用户，原密码 Test1234!
+        GVA changePassword 校验当前 token 持有者的密码, 不能改别人密码
+        流程:
+            1. temp_user 是 admin 注册的临时用户, 原密码 Test1234!
             2. 用 temp_user 自己登录拿 token
             3. 用 temp_user 的 token 调 changePassword 改自己密码
             4. 用新密码登录应成功
             5. 用旧密码登录应失败
 
         注意: 本用例把 user_api 的 token 临时换成了 temp_user 的 token,
-            finally 必须恢复为 admin token——否则 temp_user fixture teardown
-            用该 user_api 调 delete_user 会权限不足, 只能走 DB 兜底路径。
+            finally 必须恢复为 admin token - 否则 temp_user fixture teardown
+            用该 user_api 调 delete_user 会权限不足, 只能走 DB 兜底路径.
         """
         from api.auth_api import AuthApi
 
@@ -263,7 +263,7 @@ class TestChangePassword:
         old_pwd = "Test1234!"
         new_pwd = "NewPwd456!"
 
-        # temp_user 自己登录（独立 AuthApi 实例，不污染 admin token）
+        # temp_user 自己登录(独立 AuthApi 实例, 不污染 admin token)
         user_auth = AuthApi(
             base_url=user_api.base_url,
             timeout=user_api.timeout,
@@ -286,10 +286,10 @@ class TestChangePassword:
             # 旧密码登录应失败
             try:
                 user_auth.login_with_retry(username, old_pwd, max_round=1)
-                pytest.fail("旧密码仍能登录，密码未真正失效")
+                pytest.fail("旧密码仍能登录, 密码未真正失效")
             except APIException:
                 pass  # 期望抛错
         finally:
-            # 恢复 admin token（供 temp_user fixture teardown 调 delete_user 用）
-            # 不做 OCR 登录: 直接从 admin_token holder 取（已惰性刷新保证可用）
+            # 恢复 admin token(供 temp_user fixture teardown 调 delete_user 用)
+            # 不做 OCR 登录: 直接从 admin_token holder 取(已惰性刷新保证可用)
             user_api.set_token(admin_token.ensure())

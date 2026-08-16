@@ -25,11 +25,11 @@ services:
         condition: service_healthy  # 等 MySQL 健康后再启动
     environment:
       - TEST_ENV=test
-      # 覆盖数据库配置，指向 Docker 内部网络
+      # 覆盖数据库配置, 指向 Docker 内部网络
       - DB_HOST=mysql
       - DB_PORT=3306
     volumes:
-      # 把容器里的报告目录映射到本地，方便查看
+      # 把容器里的报告目录映射到本地, 方便查看
       - ./reports:/app/reports
       - ./logs:/app/logs
     networks:

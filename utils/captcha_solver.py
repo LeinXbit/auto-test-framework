@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 
 class CaptchaSolver:
-    """ddddocr 验证码识别器（懒加载，避免每次实例化都加载模型）"""
+    """ddddocr 验证码识别器(懒加载, 避免每次实例化都加载模型)"""
 
     _ocr = None
 
@@ -43,8 +43,8 @@ class CaptchaSolver:
 
     def solve_with_retry(self, fetch_captcha_func, max_retry=None):
         """
-        多次获取验证码并识别，直到长度匹配或重试上限
-        :param fetch_captcha_func: 无参函数，返回 (picPath, captchaId)
+        多次获取验证码并识别, 直到长度匹配或重试上限
+        :param fetch_captcha_func: 无参函数, 返回 (picPath, captchaId)
         :return: (code, captchaId)
         """
         retry = max_retry if max_retry is not None else self.max_retry
@@ -53,8 +53,8 @@ class CaptchaSolver:
             pic_base64, captcha_id = fetch_captcha_func()
             code = self.solve(pic_base64)
             if self.expected_length is None or len(code) == self.expected_length:
-                logger.info(f"验证码识别成功（第 {attempt} 次）: code={code!r}, captchaId={captcha_id}")
+                logger.info(f"验证码识别成功(第 {attempt} 次): code={code!r}, captchaId={captcha_id}")
                 return code, captcha_id
             logger.warning(f"第 {attempt} 次识别长度 {len(code)} != 期望 {self.expected_length}, 重试")
-        logger.error(f"验证码识别重试 {retry} 次仍未匹配期望长度，返回最后一次结果: {code!r}")
+        logger.error(f"验证码识别重试 {retry} 次仍未匹配期望长度, 返回最后一次结果: {code!r}")
         return code, captcha_id

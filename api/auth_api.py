@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-GVA 鉴权模块接口封装
-    - 获取验证码 /base/captcha
-    - 登录        /base/login
-    - 登出（JWT 加入黑名单） /jwt/jsonInBlacklist
-    - 获取当前用户信息 /user/getUserInfo
-    - 修改密码    /user/changePassword
+GVA auth module API wrapper
+    - Get captcha   /base/captcha
+    - Login         /base/login
+    - Logout (JWT blacklisted) /jwt/jsonInBlacklist
+    - Get current user info /user/getUserInfo
+    - Change password /user/changePassword
 """
 from utils.exceptions import APIException
 from utils.logger import get_logger
@@ -15,33 +15,36 @@ logger = get_logger(__name__)
 
 
 class AuthApi(BaseApi):
-    """GVA 鉴权客户端"""
+    """GVA auth client"""
 
     def __init__(self, base_url, timeout=10, captcha_solver=None):
         super().__init__(base_url, timeout)
         self.solver = captcha_solver
 
-    #  验证码
+    # Captcha
 
     def get_captcha(self):
         """
-        获取验证码
+        Get captcha
         :return: dict {captchaId, picPath, captchaLength, openCaptcha}
         """
         resp = self.post("/base/captcha", json={})
         self.assert_business_success(resp)
         data = resp.json()["data"]
         logger.info(
-            f"获取验证码成功: captchaId={data.get('captchaId')}, "
-            f"openCaptcha={data.get('openCaptcha')}, length={data.get('captchaLength')}"
+            "获取验证码成功: captchaId={}, openCaptcha={}, length={}".format(
+                data.get("captchaId"),
+                data.get("openCaptcha"),
+                data.get("captchaLength"),
+            )
         )
         return data
 
-    #  登录
+    # Login
 
     def login(self, username, password, captcha=None, captcha_id=None):
         """
-        GVA 登录接口
+        GVA login endpoint
         :return: requests.Response
         """
         payload = {
@@ -54,17 +57,17 @@ class AuthApi(BaseApi):
 
     def login_with_captcha(self, username, password):
         """
-        自动识别验证码并登录（单次尝试，验证码识别失败将抛错）
+        Auto-recognize captcha and login (single attempt; raises on captcha recognition failure)
         :return: token (str)
         """
         if self.solver is None:
-            raise APIException("未配置验证码识别器，无法自动登录")
+            raise APIException("未配置验证码识别器, 无法自动登录")
 
         def fetch_captcha():
             data = self.get_captcha()
             return data["picPath"], data["captchaId"]
 
-        # 首次获取一次以同步期望长度
+        # Fetch once first to sync the expected length
         sample = self.get_captcha()
         expected_length = sample.get("captchaLength") or self.solver.expected_length
         self.solver.expected_length = expected_length
@@ -75,60 +78,54 @@ class AuthApi(BaseApi):
         try:
             data = resp.json()
         except Exception as e:
-            raise APIException(f"登录响应不是合法 JSON: {e}", resp.status_code, resp)
+            raise APIException("登录响应不是合法 JSON: {}".format(e), resp.status_code, resp)
 
         if resp.status_code != 200 or data.get("code") != 0:
-            err = f"登录失败: code={data.get('code')}, msg={data.get('msg')}"
+            err = "登录失败: code={}, msg={}".format(data.get("code"), data.get("msg"))
             logger.error(err)
             raise APIException(err, resp.status_code, resp)
 
         token = data["data"]["token"]
-        logger.info(f"登录成功: username={username}, token={token[:30]}...")
+        logger.info("登录成功: username={}, token={}...".format(username, token[:30]))
         return token
 
     def login_with_retry(self, username, password, max_round=3):
         """
-        多轮登录尝试：单轮验证码识别失败/登录失败时整体重试
-        用于 fixture 自动登录时容忍 OCR 偶发失败
+        Multi-round login attempts: retry the whole flow when a round fails on
+        captcha recognition or login. Used by fixtures to tolerate occasional OCR failures.
         """
         last_err = None
         for round_no in range(1, max_round + 1):
             try:
                 token = self.login_with_captcha(username, password)
                 if round_no > 1:
-                    logger.info(f"登录在第 {round_no} 轮成功")
+                    logger.info("登录在第 {} 轮成功".format(round_no))
                 return token
             except Exception as e:
                 last_err = e
-                logger.warning(f"第 {round_no} 轮登录失败: {e}")
-        raise APIException(f"登录失败（已重试 {max_round} 轮）: {last_err}")
+                logger.warning("第 {} 轮登录失败: {}".format(round_no, e))
+        raise APIException("登录失败(已重试 {} 轮): {}".format(max_round, last_err))
 
-    #  登出 / JWT 黑名单
+    # Logout / JWT blacklist
 
     def logout(self):
-        """把当前 token 加入 JWT 黑名单，立即失效"""
+        """Add the current token to the JWT blacklist so it is invalidated immediately"""
         resp = self.post("/jwt/jsonInBlacklist", json={})
         self.assert_business_success(resp)
-        logger.info("登出成功，token 已加入黑名单")
+        logger.info("登出成功, token 已加入黑名单")
         return resp
 
-    #  当前用户信息
+    # Current user info
 
     def get_self_info(self):
         """
-        获取当前登录用户信息
-        GVA 实际响应结构: {"code":0,"data":{"userInfo":{...}}}
+        Get current logged-in user info
+        GVA actual response shape: {"code":0,"data":{"userInfo":{...}}}
+
+        Note: change password /user/changePassword belongs to user management and its
+              real route is POST (not PUT); it is unified in UserApi.change_password
+              and is not duplicated here.
         """
         resp = self.get("/user/getUserInfo")
         self.assert_business_success(resp)
         return resp.json()["data"]["userInfo"]
-
-    #  修改密码
-
-    def change_password(self, username, password, new_password):
-        payload = {
-            "username": username,
-            "password": password,
-            "newPassword": new_password,
-        }
-        return self.put("/user/changePassword", json=payload)

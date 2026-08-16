@@ -10,7 +10,7 @@ class MySQLClient:
     MySQL 数据库客户端
         - 封装常用查询/执行操作
         - 自动记录执行的 SQL
-        - 支持上下文管理器（with 语句）
+        - 支持上下文管理器(with 语句)
     """
     def __init__(self, host, port, user, password, database):
         self.config = {
@@ -20,7 +20,7 @@ class MySQLClient:
             "password": password,
             "database": database,
             "charset": "utf8mb4",
-            "cursorclass": pymysql.cursors.DictCursor,  # 返回字典格式
+            "cursorclass": pymysql.cursors.DictCursor, # 返回字典格式
             "autocommit": True
         }
         self.conn = None
