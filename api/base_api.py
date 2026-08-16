@@ -32,7 +32,7 @@ class BaseApi:
             "Accept": "application/json",
         })
 
-    # ============ 鉴权 ============
+    #  鉴权
 
     def set_token(self, token):
         """GVA 使用 x-token 头部鉴权"""
@@ -41,7 +41,7 @@ class BaseApi:
         self.session.headers["x-token"] = token
         logger.info("x-token 已注入请求头")
 
-    # ============ 请求 ============
+    #  请求
 
     def request(self, method, url, **kwargs):
         full_url = f"{self.base_url}{url}"
@@ -114,7 +114,7 @@ class BaseApi:
     def delete(self, url, **kwargs):
         return self.request("DELETE", url, **kwargs)
 
-    # ============ 断言 ============
+    #  断言
 
     def assert_status_code(self, response, expected=200):
         """断言 HTTP 状态码，失败抛 APIException"""

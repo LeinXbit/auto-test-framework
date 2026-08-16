@@ -30,7 +30,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-# ============ Session 级：admin token / captcha solver ============
+#  Session 级：admin token / captcha solver
 
 @pytest.fixture(scope="session")
 def captcha_solver():

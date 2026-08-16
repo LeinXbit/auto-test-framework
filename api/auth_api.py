@@ -21,7 +21,7 @@ class AuthApi(BaseApi):
         super().__init__(base_url, timeout)
         self.solver = captcha_solver
 
-    # ===== 验证码 =====
+    #  验证码
 
     def get_captcha(self):
         """
@@ -37,7 +37,7 @@ class AuthApi(BaseApi):
         )
         return data
 
-    # ===== 登录 =====
+    #  登录
 
     def login(self, username, password, captcha=None, captcha_id=None):
         """
@@ -103,7 +103,7 @@ class AuthApi(BaseApi):
                 logger.warning(f"第 {round_no} 轮登录失败: {e}")
         raise APIException(f"登录失败（已重试 {max_round} 轮）: {last_err}")
 
-    # ===== 登出 / JWT 黑名单 =====
+    #  登出 / JWT 黑名单
 
     def logout(self):
         """把当前 token 加入 JWT 黑名单，立即失效"""
@@ -112,7 +112,7 @@ class AuthApi(BaseApi):
         logger.info("登出成功，token 已加入黑名单")
         return resp
 
-    # ===== 当前用户信息 =====
+    #  当前用户信息
 
     def get_self_info(self):
         """
@@ -123,7 +123,7 @@ class AuthApi(BaseApi):
         self.assert_business_success(resp)
         return resp.json()["data"]["userInfo"]
 
-    # ===== 修改密码 =====
+    #  修改密码
 
     def change_password(self, username, password, new_password):
         payload = {

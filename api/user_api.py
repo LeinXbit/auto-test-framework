@@ -13,7 +13,7 @@ class UserApi(BaseApi):
     所有写操作默认走管理员鉴权（由 fixture 注入 x-token）
     """
 
-    # ===== 用户注册 / 列表 / 删除 / 设置权限 =====
+    #  用户注册 / 列表 / 删除 / 设置权限
 
     def admin_register(self, username, password, nick_name=None,
                        phone=None, email=None, authority_id=888, **extra):
@@ -53,7 +53,7 @@ class UserApi(BaseApi):
             "authorityId": int(authority_id),
         })
 
-    # ===== 当前用户信息（与 AuthApi 一致，便于直接调用） =====
+    # 当前用户信息（与 AuthApi 一致，便于直接调用）
 
     def get_self_info(self):
         """获取当前登录用户信息：GET /user/getUserInfo"""
