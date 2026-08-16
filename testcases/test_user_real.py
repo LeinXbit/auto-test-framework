@@ -243,7 +243,7 @@ class TestChangePassword:
     @allure.severity(allure.severity_level.CRITICAL)
     @pytest.mark.regression
     @pytest.mark.api
-    def test_change_own_password_then_login(self, user_api, captcha_solver, temp_user):
+    def test_change_own_password_then_login(self, user_api, captcha_solver, temp_user, admin_token):
         """
         GVA changePassword 校验当前 token 持有者的密码，不能改别人密码
         流程：
@@ -252,6 +252,10 @@ class TestChangePassword:
             3. 用 temp_user 的 token 调 changePassword 改自己密码
             4. 用新密码登录应成功
             5. 用旧密码登录应失败
+
+        注意: 本用例把 user_api 的 token 临时换成了 temp_user 的 token,
+            finally 必须恢复为 admin token——否则 temp_user fixture teardown
+            用该 user_api 调 delete_user 会权限不足, 只能走 DB 兜底路径。
         """
         from api.auth_api import AuthApi
 
@@ -286,16 +290,6 @@ class TestChangePassword:
             except APIException:
                 pass  # 期望抛错
         finally:
-            # 恢复 admin token（避免污染后续用例）
-            from config.settings import settings
-            admin_auth = AuthApi(
-                base_url=settings.base_url,
-                timeout=settings.timeout,
-                captcha_solver=captcha_solver,
-            )
-            admin_token = admin_auth.login_with_retry(
-                settings.admin_account["username"],
-                settings.admin_account["password"],
-                max_round=3,
-            )
-            user_api.set_token(admin_token)
+            # 恢复 admin token（供 temp_user fixture teardown 调 delete_user 用）
+            # 不做 OCR 登录: 直接从 admin_token holder 取（已惰性刷新保证可用）
+            user_api.set_token(admin_token.ensure())

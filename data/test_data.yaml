@@ -1,46 +1,60 @@
-# 用户注册场景测试数据
+# GVA 用户注册场景数据驱动用例
+# 说明:
+#   1. GVA 统一响应 {"code":0|非0,"data":..,"msg":".."}, HTTP 状态码恒为 200,
+#      故 expected_http 恒为 200, 不再使用旧的 201/409/400(那是 mock 时代残留, 已废弃)。
+#   2. GVA 失败业务码实测多为 7(如重复注册), 成功为 0。
+#   3. 标注 "待探针确认" 的字段表示尚未用真实接口验证, 接入用例前需先探针确认实际 code/msg,
+#      避免再次写入与真实行为不符的断言(这正是本次治脏要纠正的问题)。
+#   4. 本文件为 Phase 3 数据驱动改造的种子, 当前未被用例直接引用。
+
 register_cases:
   - case_id: "REG_001"
     case_name: "正常注册"
-    username: "normal_user"
-    password: "Pass123!"
-    email: "normal@test.com"
-    expected_status: 201
+    username: "auto_${random}"        # 运行时由用例替换为唯一用户名, 避免污染
+    password: "Test1234!"
+    nick_name: "auto_user"
+    authority_id: 888
+    expected_http: 200
     expected_code: 0
-    description: "使用合法参数注册，期望成功"
+    expected_msg_contains: ""
+    description: "合法参数注册, 期望成功并返回 data.user(含 ID)"
 
   - case_id: "REG_002"
     case_name: "用户名重复"
-    username: "existing_user"
-    password: "Pass123!"
-    email: "dup@test.com"
-    expected_status: 409
-    expected_code: 1001
-    description: "用户名已存在，期望返回冲突"
+    username: "${existing_user}"     # 用例先注册一次, 再用同名注册
+    password: "Test1234!"
+    authority_id: 888
+    expected_http: 200
+    expected_code: 7
+    expected_msg_contains: "失败"
+    description: "用户名已存在, 期望 code=7 且 msg 含'失败'"
 
   - case_id: "REG_003"
-    case_name: "密码太短"
-    username: "short_pass"
-    password: "123"
-    email: "short@test.com"
-    expected_status: 400
-    expected_code: 1002
-    description: "密码长度不足6位，期望参数校验失败"
+    case_name: "authorityId 传字符串(类型越界)"
+    username: "auto_${random}"
+    password: "Test1234!"
+    authority_id: "888"             # GVA 后端字段为 uint, 传字符串应被拒绝
+    expected_http: 200
+    expected_code: null             # 待探针确认: 可能 400/绑定错误或 code=7
+    expected_msg_contains: ""
+    description: "类型越界, 接入前需探针确认实际响应码"
 
   - case_id: "REG_004"
-    case_name: "邮箱格式错误"
-    username: "bad_email"
-    password: "Pass123!"
-    email: "not-an-email"
-    expected_status: 400
-    expected_code: 1003
-    description: "邮箱格式不合法，期望参数校验失败"
+    case_name: "密码为空"
+    username: "auto_${random}"
+    password: ""
+    authority_id: 888
+    expected_http: 200
+    expected_code: null             # 待探针确认
+    expected_msg_contains: ""
+    description: "必填项缺失, 接入前需探针确认实际响应码"
 
   - case_id: "REG_005"
-    case_name: "用户名空值"
+    case_name: "用户名为空"
     username: ""
-    password: "Pass123!"
-    email: "empty@test.com"
-    expected_status: 400
-    expected_code: 1004
-    description: "用户名为空，期望参数校验失败"
+    password: "Test1234!"
+    authority_id: 888
+    expected_http: 200
+    expected_code: null             # 待探针确认
+    expected_msg_contains: ""
+    description: "必填项缺失, 接入前需探针确认实际响应码"

@@ -43,9 +43,10 @@ class TestLoginFlow:
     @allure.severity(allure.severity_level.BLOCKER)
     @pytest.mark.smoke
     def test_admin_token_available(self, admin_token):
-        """session fixture 应当成功登录并返回非空 token"""
-        assert admin_token, "admin_token fixture 返回空 token"
-        assert isinstance(admin_token, str) and len(admin_token) > 20, "token 长度异常"
+        """session fixture 应当成功登录并返回非空 token（admin_token 现为可刷新 holder 对象）"""
+        tok = admin_token.ensure()
+        assert tok, "admin_token fixture 返回空 token"
+        assert isinstance(tok, str) and len(tok) > 20, "token 长度异常"
 
     @allure.title("登录态下获取当前用户信息")
     @allure.severity(allure.severity_level.CRITICAL)
@@ -93,21 +94,19 @@ class TestLogout:
     @allure.title("登出后旧 token 应失效")
     @allure.severity(allure.severity_level.CRITICAL)
     @pytest.mark.regression
-    def test_logout_invalidates_token(self):
+    def test_logout_invalidates_token(self, disposable_token):
         """
         验证 /jwt/jsonInBlacklist 登出后，旧 token 立即失效
-        注意：此用例单独登录拿临时 token，不复用 session fixture，避免污染其它用例
+
+        关键：使用 disposable_token fixture（函数级独立 token），
+            fixture teardown 会自动登出，绝对不污染 session 级 admin_token。
+            即便 GVA 把同账号全部 token 连带作废，下一个 API 客户端创建时
+            admin_token.ensure() 也会自动重登，不影响后续用例。
         """
-        solver = CaptchaSolver(expected_length=6, max_retry=5)
+        token = disposable_token
         auth = AuthApi(
             base_url=settings.base_url,
             timeout=settings.timeout,
-            captcha_solver=solver,
-        )
-        token = auth.login_with_retry(
-            username=settings.admin_account["username"],
-            password=settings.admin_account["password"],
-            max_round=3,
         )
         auth.set_token(token)
 
@@ -115,7 +114,7 @@ class TestLogout:
         info_before = auth.get_self_info()
         assert info_before.get("userName") == "admin"
 
-        # 执行登出
+        # 执行登出（这个 disposable_token 登出后，由 fixture teardown 做收尾）
         auth.logout()
 
         # 登出后：旧 token 应失效

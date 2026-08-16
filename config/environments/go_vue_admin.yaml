@@ -1,23 +1,20 @@
 # gin-vue-admin 本地真实业务环境配置
+# 敏感配置(数据库密码/管理员密码)不落此文件, 统一走环境变量/.env,
+# 参见 .env.example 与 config/settings.py 的 db_config / admin_account
+
 base_url: "http://127.0.0.1:8888"
 
-# GVA 默认使用 gva 库
+# GVA 默认使用 gva 库(host/port/user/database 可在此覆盖, password 走环境变量)
 database:
   host: "127.0.0.1"
   port: 3306
   user: "root"
-  password: "GJH123gjh+"
   database: "gva"
   charset: "utf8mb4"
 
 timeout: 10
 
-# 管理员账号（用于 fixture 自动登录）
-admin:
-  username: "admin"
-  password: "123456"
-
-# 验证码识别配置（GVA 强制开启验证码，用 ddddocr 自动识别）
+# 验证码识别配置(GVA 强制开启验证码,用 ddddocr 自动识别)
 captcha:
   solver: "ddddocr"
   max_retry: 5
