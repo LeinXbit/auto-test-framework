@@ -1,0 +1,74 @@
+# CI self-contained GVA stack (build GVA server from source)
+#
+# Usage (local or CI runner with Docker):
+#   git clone --depth 1 https://github.com/flipped-aurora/gin-vue-admin.git gva-source
+#   docker compose -f .github/docker-compose.ci.yml up -d --wait
+#   # then run pytest with GVA_BASE_URL=http://127.0.0.1:8888
+#
+# Notes:
+#   - First build takes ~5-10 min (Go modules + alpine image)
+#   - GVA auto-migrates schema on first boot (GORM AutoMigrate + initial data seed)
+#   - Admin account defaults to admin / 123456 (GVA built-in seed)
+#   - Redis is required by GVA for JWT blacklist / casbin cache
+#
+# GVA has no official prebuilt Docker image on Docker Hub, so we build from source
+# using the official Dockerfile in the gin-vue-admin server directory.
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: gva-ci-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: gva
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p123456"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - gva-ci
+
+  redis:
+    image: redis:6.0
+    container_name: gva-ci-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gva-ci
+
+  gva-server:
+    build:
+      context: ./gva-source/server
+      dockerfile: Dockerfile
+    container_name: gva-ci-server
+    ports:
+      - "8888:8888"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # GVA viper config overrides via env vars (config.docker.yaml defaults)
+      - GVA_CONFIG_mysql_path=mysql:3306
+      - GVA_CONFIG_mysql_username=root
+      - GVA_CONFIG_mysql_password=123456
+      - GVA_CONFIG_mysql_dbname=gva
+      - GVA_CONFIG_mysql_config=charset=utf8mb4&parseTime=True&loc=Local
+      - GVA_CONFIG_redis_addr=redis:6379
+      - GVA_CONFIG_system_env=public
+    networks:
+      - gva-ci
+
+networks:
+  gva-ci:
+    driver: bridge

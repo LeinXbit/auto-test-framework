@@ -1,29 +1,36 @@
 name: Auto Test CI
 
+# Two-stage CI pipeline:
+#   1. static-check  : always runs on push/PR, fast, no GVA needed
+#                      validates YAML, imports and pytest collection
+#   2. integration    : manual or scheduled, needs a reachable GVA service
+#                      (staging URL via GVA_BASE_URL secret or self-hosted runner)
+# GVA has no official prebuilt Docker image, so SUT is deployed separately
+# (see .github/docker-compose.ci.yml for a self-contained build-from-source option)
+
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      gva_base_url:
+        description: 'GVA base URL for integration tests (e.g. http://10.0.0.1:8888)'
+        required: false
+        default: ''
+#  schedule:
+#    # Nightly at 02:00 UTC (10:00 GMT+8) for full integration on self-hosted runner
+#    - cron: '0 2 * * *'
+
+env:
+  PYTHONPATH: .vendor
+  TEST_ENV: ci
 
 jobs:
-  test:
+  static-check:
+    name: Static Check & Collection
     runs-on: ubuntu-latest
-
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: 123456
-          MYSQL_DATABASE: test_db
-        ports:
-          - 3307:3306
-        options: >-
-          --health-cmd="mysqladmin ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -32,28 +39,95 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install dependencies to .vendor
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --target .vendor -r requirements.txt
 
-      - name: Wait for MySQL
+      - name: Validate YAML configs
         run: |
-          sudo apt-get update
-          sudo apt-get install -y mysql-client
-          for i in {1..30}; do
-            mysqladmin ping -h 127.0.0.1 -P 3307 --silent && break
-            echo "Waiting for MySQL... ($i)"
-            sleep 2
+          python -c "import yaml; yaml.safe_load(open('config/environments/ci.yaml', encoding='utf-8')); print('ci.yaml OK')"
+          python -c "import yaml; yaml.safe_load(open('config/environments/go_vue_admin.yaml', encoding='utf-8')); print('go_vue_admin.yaml OK')"
+          python -c "import yaml; yaml.safe_load(open('data/test_data.yaml', encoding='utf-8')); print('test_data.yaml OK')"
+
+      - name: Pytest collection (no execution, validates imports/fixtures)
+        run: pytest --collect-only -q
+
+      - name: Compile all Python files (syntax check)
+        run: python -m compileall -q api config db utils testcases
+
+  integration:
+    name: Integration Tests (needs GVA)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    env:
+      # GVA target: workflow input takes precedence, then secret, then localhost
+      GVA_BASE_URL: ${{ github.event.inputs.gva_base_url || secrets.GVA_BASE_URL || 'http://127.0.0.1:8888' }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD || '123456' }}
+      DB_DATABASE: ${{ secrets.DB_DATABASE || 'gva' }}
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME || 'admin' }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD || '123456' }}
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.DB_PASSWORD || '123456' }}
+          MYSQL_DATABASE: ${{ secrets.DB_DATABASE || 'gva' }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -p${{ secrets.DB_PASSWORD || '123456' }}"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies to .vendor
+        run: |
+          python -m pip install --upgrade pip
+          pip install --target .vendor -r requirements.txt
+
+      - name: Show resolved config
+        run: |
+          echo "GVA_BASE_URL=$GVA_BASE_URL"
+          echo "DB_HOST=$DB_HOST DB_DATABASE=$DB_DATABASE"
+          python -c "from config.settings import settings; print('base_url=', settings.base_url)"
+
+      - name: Probe GVA reachability (skip job if GVA is down)
+        run: |
+          echo "Probing GVA at $GVA_BASE_URL ..."
+          for i in $(seq 1 30); do
+            if curl -sf --max-time 5 "$GVA_BASE_URL/swagger/index.html" -o /dev/null; then
+              echo "GVA is reachable"
+              exit 0
+            fi
+            echo "Waiting for GVA... ($i/30)"
+            sleep 5
           done
+          echo "::warning::GVA not reachable at $GVA_BASE_URL, skipping integration tests"
+          echo "GVA_REACHABLE=false" >> $GITHUB_ENV
 
       - name: Run tests
+        if: env.GVA_REACHABLE != 'false'
         run: pytest -v --alluredir=reports/allure-results
 
       - name: Upload Allure results
+        if: always() && env.GVA_REACHABLE != 'false'
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: allure-results
           path: reports/allure-results
+          if-no-files-found: warn

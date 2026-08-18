@@ -1,20 +1,22 @@
-# 使用官方 Python 3.11 轻量镜像
+# Official Python 3.11 slim image
 FROM python:3.11-slim
 
-# 设置工作目录
 WORKDIR /app
 
-# 先复制依赖文件(利用 Docker 缓存层, 依赖不变时不重复安装)
+# Copy requirements first to leverage Docker layer caching
 COPY requirements.txt .
 
-# 安装依赖(使用清华源加速)
-RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+# Install deps to .vendor so pytest.ini (pythonpath = .vendor) can find them
+# Also set PYTHONPATH so the project modules + .vendor are both importable
+RUN pip install --no-cache-dir --target .vendor -r requirements.txt \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 复制项目代码
+# Copy project source
 COPY . .
 
-# 设置默认环境变量
-ENV TEST_ENV=test
+# Default env: tests run against a reachable GVA (override at runtime)
+ENV TEST_ENV=ci \
+    PYTHONPATH=/app:/app/.vendor
 
-# 默认命令: 运行测试
+# Default command: run the full test suite
 CMD ["pytest"]

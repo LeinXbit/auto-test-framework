@@ -1,0 +1,24 @@
+# CI environment config
+# base_url is overridden by GVA_BASE_URL env var (see settings.py base_url)
+# so staging / self-hosted GVA can be pointed at without touching this file
+# DB / admin credentials are injected via CI secrets / env vars
+# (see .env.example and .github/workflows/ci.yml)
+
+base_url: "http://127.0.0.1:8888"
+
+# DB defaults target localhost MySQL service container in CI
+# password / user / database can be overridden by DB_* env vars
+database:
+  host: "127.0.0.1"
+  port: 3306
+  user: "root"
+  database: "gva"
+  charset: "utf8mb4"
+
+timeout: 15
+
+# Captcha recognition config (same as local GVA)
+captcha:
+  solver: "ddddocr"
+  max_retry: 5
+  expected_length: 6

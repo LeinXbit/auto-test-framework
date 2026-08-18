@@ -76,7 +76,8 @@ class Settings:
 
     @property
     def base_url(self):
-        return self.get("base_url")
+        # CI/staging overrides via env var so the same YAML works across envs
+        return os.getenv("GVA_BASE_URL", self.get("base_url"))
 
     @property
     def db_config(self):
