@@ -1,11 +1,18 @@
+# Docker Compose for running the test framework in a container.
+# Notes:
+#   - This compose starts a MySQL container only, NOT the GVA backend.
+#     GVA must be deployed separately (see .github/docker-compose.ci.yml for a
+#     self-contained GVA+MySQL+Redis option) because GVA has no prebuilt image.
+#   - Point GVA_BASE_URL at a reachable GVA (e.g. host machine, staging server).
+#     If GVA is on the host, use "host.docker.internal:8888" or the docker host IP.
+
 services:
-  # MySQL 测试数据库
   mysql:
     image: mysql:8.0
     container_name: test-mysql-compose
     environment:
       MYSQL_ROOT_PASSWORD: 123456
-      MYSQL_DATABASE: test_db
+      MYSQL_DATABASE: gva
     ports:
       - "3307:3306"
     healthcheck:
@@ -16,20 +23,26 @@ services:
     networks:
       - test-network
 
-  # 自动化测试服务
   auto-test:
     build: .
     container_name: auto-test-framework
     depends_on:
       mysql:
-        condition: service_healthy  # 等 MySQL 健康后再启动
+        condition: service_healthy
     environment:
-      - TEST_ENV=test
-      # 覆盖数据库配置, 指向 Docker 内部网络
-      - DB_HOST=mysql
-      - DB_PORT=3306
+      TEST_ENV: ci
+      # Override to point at a reachable GVA (staging / host machine)
+      GVA_BASE_URL: ${GVA_BASE_URL:-http://host.docker.internal:8888}
+      # DB points at the internal mysql service
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: 123456
+      DB_DATABASE: gva
+      # Default GVA admin account
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: 123456
     volumes:
-      # 把容器里的报告目录映射到本地, 方便查看
       - ./reports:/app/reports
       - ./logs:/app/logs
     networks:

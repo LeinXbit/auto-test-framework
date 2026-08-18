@@ -7,6 +7,13 @@ name: Auto Test CI
 #                      (staging URL via GVA_BASE_URL secret or self-hosted runner)
 # GVA has no official prebuilt Docker image, so SUT is deployed separately
 # (see .github/docker-compose.ci.yml for a self-contained build-from-source option)
+#
+# Required GitHub Secrets (Settings -> Secrets and variables -> Actions):
+#   GVA_BASE_URL   e.g. http://10.0.0.1:8888 (point at reachable GVA)
+#   DB_PASSWORD    root password of the GVA MySQL instance
+#   DB_DATABASE    (optional, default: gva)
+#   ADMIN_USERNAME (optional, default: admin)
+#   ADMIN_PASSWORD (optional, default: 123456)
 
 on:
   push:
@@ -19,9 +26,10 @@ on:
         description: 'GVA base URL for integration tests (e.g. http://10.0.0.1:8888)'
         required: false
         default: ''
-#  schedule:
-#    # Nightly at 02:00 UTC (10:00 GMT+8) for full integration on self-hosted runner
-#    - cron: '0 2 * * *'
+      db_password:
+        description: 'GVA MySQL root password (optional, defaults to Secret or 123456)'
+        required: false
+        default: ''
 
 env:
   PYTHONPATH: .vendor
@@ -61,27 +69,21 @@ jobs:
   integration:
     name: Integration Tests (needs GVA)
     runs-on: ubuntu-latest
+    # Integration needs a reachable GVA, only run on manual/schedule
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-    env:
-      # GVA target: workflow input takes precedence, then secret, then localhost
-      GVA_BASE_URL: ${{ github.event.inputs.gva_base_url || secrets.GVA_BASE_URL || 'http://127.0.0.1:8888' }}
-      DB_HOST: 127.0.0.1
-      DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD || '123456' }}
-      DB_DATABASE: ${{ secrets.DB_DATABASE || 'gva' }}
-      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME || 'admin' }}
-      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD || '123456' }}
+    # MySQL services container: healthcheck must use literal strings
+    # (GitHub Actions does not allow ${{ secrets.* }} substitution inside services.options
+    #  and services.env; hard-coded defaults match .env.example defaults.)
     services:
       mysql:
         image: mysql:8.0
         env:
-          MYSQL_ROOT_PASSWORD: ${{ secrets.DB_PASSWORD || '123456' }}
-          MYSQL_DATABASE: ${{ secrets.DB_DATABASE || 'gva' }}
+          MYSQL_ROOT_PASSWORD: 123456
+          MYSQL_DATABASE: gva
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -p${{ secrets.DB_PASSWORD || '123456' }}"
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -p123456"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
@@ -100,13 +102,42 @@ jobs:
           python -m pip install --upgrade pip
           pip install --target .vendor -r requirements.txt
 
-      - name: Show resolved config
+      - name: Resolve environment variables (input > secret > default)
+        run: |
+          # Bash fallback chain: workflow input -> Secret -> built-in default
+          GVA_BASE_URL="${{ github.event.inputs.gva_base_url }}"
+          GVA_BASE_URL="${GVA_BASE_URL:-${{ secrets.GVA_BASE_URL }}}"
+          GVA_BASE_URL="${GVA_BASE_URL:-http://127.0.0.1:8888}"
+          echo "GVA_BASE_URL=$GVA_BASE_URL" >> $GITHUB_ENV
+
+          DB_PASSWORD="${{ github.event.inputs.db_password }}"
+          DB_PASSWORD="${DB_PASSWORD:-${{ secrets.DB_PASSWORD }}}"
+          DB_PASSWORD="${DB_PASSWORD:-123456}"
+          echo "DB_PASSWORD=$DB_PASSWORD" >> $GITHUB_ENV
+
+          DB_DATABASE="${{ secrets.DB_DATABASE }}"
+          DB_DATABASE="${DB_DATABASE:-gva}"
+          echo "DB_DATABASE=$DB_DATABASE" >> $GITHUB_ENV
+
+          ADMIN_USERNAME="${{ secrets.ADMIN_USERNAME }}"
+          ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+          echo "ADMIN_USERNAME=$ADMIN_USERNAME" >> $GITHUB_ENV
+
+          ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}"
+          ADMIN_PASSWORD="${ADMIN_PASSWORD:-123456}"
+          echo "ADMIN_PASSWORD=$ADMIN_PASSWORD" >> $GITHUB_ENV
+
+          echo "DB_HOST=127.0.0.1" >> $GITHUB_ENV
+          echo "DB_PORT=3306" >> $GITHUB_ENV
+          echo "DB_USER=root" >> $GITHUB_ENV
+
+      - name: Show resolved config (secrets masked)
         run: |
           echo "GVA_BASE_URL=$GVA_BASE_URL"
-          echo "DB_HOST=$DB_HOST DB_DATABASE=$DB_DATABASE"
+          echo "DB_HOST=$DB_HOST DB_DATABASE=$DB_DATABASE DB_USER=$DB_USER"
           python -c "from config.settings import settings; print('base_url=', settings.base_url)"
 
-      - name: Probe GVA reachability (skip job if GVA is down)
+      - name: Probe GVA reachability (skip gracefully if GVA is down)
         run: |
           echo "Probing GVA at $GVA_BASE_URL ..."
           for i in $(seq 1 30); do
