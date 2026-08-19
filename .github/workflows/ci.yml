@@ -75,7 +75,7 @@ jobs:
 
       - name: Clone GVA source code
         run: |
-          git clone --depth 1 https://github.com/flipped-aurora/gin-vue-admin.git gva-source
+          git clone --depth 1 --branch v2.5.6 https://github.com/flipped-aurora/gin-vue-admin.git gva-source
           ls -la gva-source/server/
 
       - name: Start GVA stack with Docker Compose
