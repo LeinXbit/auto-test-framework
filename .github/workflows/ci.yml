@@ -56,8 +56,6 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
 
-    # 移除 services.mysql,由 docker-compose.ci.yml 统一管理
-
     steps:
       - name: Checkout test framework
         uses: actions/checkout@v4
@@ -73,7 +71,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --target .vendor -r requirements.txt
 
-      # 构建 GVA 服务栈
+      #  构建 GVA 服务栈
 
       - name: Clone GVA source code
         run: |
@@ -82,8 +80,8 @@ jobs:
 
       - name: Start GVA stack with Docker Compose
         run: |
-          docker compose -f docker-compose.ci.yml up -d --wait
-          docker compose -f docker-compose.ci.yml ps
+          docker compose -f .github/docker-compose.ci.yml up -d --wait
+          docker compose -f .github/docker-compose.ci.yml ps
 
       - name: Wait for GVA to be ready
         run: |
@@ -97,7 +95,7 @@ jobs:
             sleep 5
           done
           echo "GVA failed to start"
-          docker compose -f docker-compose.ci.yml logs gva-server
+          docker compose -f .github/docker-compose.ci.yml logs gva-server
           exit 1
 
       #  配置测试环境
@@ -109,7 +107,7 @@ jobs:
             GVA_BASE_URL="http://127.0.0.1:8888"
           fi
           echo "GVA_BASE_URL=$GVA_BASE_URL" >> $GITHUB_ENV
-          
+
           echo "DB_PASSWORD=123456" >> $GITHUB_ENV
           echo "DB_HOST=127.0.0.1" >> $GITHUB_ENV
           echo "DB_PORT=3306" >> $GITHUB_ENV
@@ -141,8 +139,8 @@ jobs:
         if: failure()
         run: |
           echo "=== GVA Server Logs ==="
-          docker compose -f docker-compose.ci.yml logs gva-server --tail=50
+          docker compose -f .github/docker-compose.ci.yml logs gva-server --tail=50
           echo "=== MySQL Logs ==="
-          docker compose -f docker-compose.ci.yml logs mysql --tail=20
+          docker compose -f .github/docker-compose.ci.yml logs mysql --tail=20
           echo "=== Redis Logs ==="
-          docker compose -f docker-compose.ci.yml logs redis --tail=20
+          docker compose -f .github/docker-compose.ci.yml logs redis --tail=20
