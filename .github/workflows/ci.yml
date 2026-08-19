@@ -119,74 +119,81 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Resolve connection env vars (input > secret > default)
-        shell: bash
+        shell: pwsh
         run: |
-          VAL="${{ github.event.inputs.gva_base_url }}"
-          VAL="${VAL:-${{ secrets.GVA_BASE_URL }}}"
-          VAL="${VAL:-http://127.0.0.1:8888}"
-          echo "GVA_BASE_URL=$VAL" >> $GITHUB_ENV
+          $VAL = "${{ github.event.inputs.gva_base_url }}"
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "${{ secrets.GVA_BASE_URL }}" }
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "http://127.0.0.1:8888" }
+          echo "GVA_BASE_URL=$VAL" >> $env:GITHUB_ENV
 
-          VAL="${{ github.event.inputs.db_password }}"
-          VAL="${VAL:-${{ secrets.DB_PASSWORD }}}"
-          VAL="${VAL:-123456}"
-          echo "DB_PASSWORD=$VAL" >> $GITHUB_ENV
+          $VAL = "${{ github.event.inputs.db_password }}"
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "${{ secrets.DB_PASSWORD }}" }
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "123456" }
+          echo "DB_PASSWORD=$VAL" >> $env:GITHUB_ENV
 
-          VAL="${{ github.event.inputs.db_host }}"
-          VAL="${VAL:-${{ secrets.DB_HOST }}}"
-          VAL="${VAL:-127.0.0.1}"
-          echo "DB_HOST=$VAL" >> $GITHUB_ENV
+          $VAL = "${{ github.event.inputs.db_host }}"
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "${{ secrets.DB_HOST }}" }
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "127.0.0.1" }
+          echo "DB_HOST=$VAL" >> $env:GITHUB_ENV
 
-          VAL="${{ github.event.inputs.db_port }}"
-          VAL="${VAL:-${{ secrets.DB_PORT }}}"
-          VAL="${VAL:-3306}"
-          echo "DB_PORT=$VAL" >> $GITHUB_ENV
+          $VAL = "${{ github.event.inputs.db_port }}"
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "${{ secrets.DB_PORT }}" }
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "3306" }
+          echo "DB_PORT=$VAL" >> $env:GITHUB_ENV
 
-          VAL="${{ github.event.inputs.db_user }}"
-          VAL="${VAL:-${{ secrets.DB_USER }}}"
-          VAL="${VAL:-root}"
-          echo "DB_USER=$VAL" >> $GITHUB_ENV
+          $VAL = "${{ github.event.inputs.db_user }}"
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "${{ secrets.DB_USER }}" }
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "root" }
+          echo "DB_USER=$VAL" >> $env:GITHUB_ENV
 
-          VAL="${{ github.event.inputs.db_database }}"
-          VAL="${VAL:-${{ secrets.DB_DATABASE }}}"
-          VAL="${VAL:-gva}"
-          echo "DB_DATABASE=$VAL" >> $GITHUB_ENV
+          $VAL = "${{ github.event.inputs.db_database }}"
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "${{ secrets.DB_DATABASE }}" }
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "gva" }
+          echo "DB_DATABASE=$VAL" >> $env:GITHUB_ENV
 
-          VAL="${{ github.event.inputs.admin_username }}"
-          VAL="${VAL:-${{ secrets.ADMIN_USERNAME }}}"
-          VAL="${VAL:-admin}"
-          echo "ADMIN_USERNAME=$VAL" >> $GITHUB_ENV
+          $VAL = "${{ github.event.inputs.admin_username }}"
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "${{ secrets.ADMIN_USERNAME }}" }
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "admin" }
+          echo "ADMIN_USERNAME=$VAL" >> $env:GITHUB_ENV
 
-          VAL="${{ github.event.inputs.admin_password }}"
-          VAL="${VAL:-${{ secrets.ADMIN_PASSWORD }}}"
-          VAL="${VAL:-123456}"
-          echo "ADMIN_PASSWORD=$VAL" >> $GITHUB_ENV
+          $VAL = "${{ github.event.inputs.admin_password }}"
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "${{ secrets.ADMIN_PASSWORD }}" }
+          if ([string]::IsNullOrEmpty($VAL)) { $VAL = "123456" }
+          echo "ADMIN_PASSWORD=$VAL" >> $env:GITHUB_ENV
 
       - name: Show resolved config
-        shell: bash
+        shell: pwsh
         run: |
-          echo "GVA_BASE_URL=$GVA_BASE_URL"
-          echo "DB_HOST=$DB_HOST DB_PORT=$DB_PORT DB_USER=$DB_USER DB_DATABASE=$DB_DATABASE"
-          echo "ADMIN_USERNAME=$ADMIN_USERNAME"
+          echo "GVA_BASE_URL=$env:GVA_BASE_URL"
+          echo "DB_HOST=$env:DB_HOST DB_PORT=$env:DB_PORT DB_USER=$env:DB_USER DB_DATABASE=$env:DB_DATABASE"
+          echo "ADMIN_USERNAME=$env:ADMIN_USERNAME"
           python -c "from config.settings import settings; print('base_url=', settings.base_url)"
 
       - name: Probe GVA reachability
-        shell: bash
+        shell: pwsh
         run: |
-          echo "Probing GVA at $GVA_BASE_URL ..."
-          for i in $(seq 1 30); do
-            if curl -sf --max-time 5 "$GVA_BASE_URL/swagger/index.html" -o /dev/null; then
-              echo "GVA is reachable"
-              exit 0
-            fi
+          echo "Probing GVA at $env:GVA_BASE_URL ..."
+          $reachable = $false
+          for ($i = 1; $i -le 30; $i++) {
+            try {
+              $response = Invoke-WebRequest -Uri "$env:GVA_BASE_URL/swagger/index.html" -Method Head -TimeoutSec 5
+              if ($response.StatusCode -eq 200) {
+                echo "GVA is reachable"
+                $reachable = $true
+                exit 0
+              }
+            } catch {}
             echo "Waiting for GVA... ($i/30)"
-            sleep 5
-          done
-          echo "::warning::GVA not reachable at $GVA_BASE_URL, skipping integration tests"
-          echo "GVA_REACHABLE=false" >> $GITHUB_ENV
+            Start-Sleep -Seconds 5
+          }
+          if (-not $reachable) {
+            echo "::warning::GVA not reachable at $env:GVA_BASE_URL, skipping integration tests"
+            echo "GVA_REACHABLE=false" >> $env:GITHUB_ENV
+          }
 
       - name: Run tests
         if: env.GVA_REACHABLE != 'false'
-        shell: bash
+        shell: pwsh
         run: python -m pytest -v --alluredir=reports/allure-results
 
       - name: Upload Allure results
