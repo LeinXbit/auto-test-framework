@@ -118,11 +118,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies to .vendor
-        run: |
-          py -m pip install --upgrade pip
-          py -m pip install --target .vendor -r requirements.txt
-
       - name: Resolve connection env vars (input > secret > default)
         shell: bash
         run: |
@@ -130,7 +125,11 @@ jobs:
           VAL="${VAL:-${{ secrets.GVA_BASE_URL }}}"
           VAL="${VAL:-http://127.0.0.1:8888}"
           echo "GVA_BASE_URL=$VAL" >> $GITHUB_ENV
-          echo "Using GVA_BASE_URL=$VAL"
+
+          VAL="${{ github.event.inputs.db_password }}"
+          VAL="${VAL:-${{ secrets.DB_PASSWORD }}}"
+          VAL="${VAL:-123456}"
+          echo "DB_PASSWORD=$VAL" >> $GITHUB_ENV
 
           VAL="${{ github.event.inputs.db_host }}"
           VAL="${VAL:-${{ secrets.DB_HOST }}}"
@@ -146,11 +145,6 @@ jobs:
           VAL="${VAL:-${{ secrets.DB_USER }}}"
           VAL="${VAL:-root}"
           echo "DB_USER=$VAL" >> $GITHUB_ENV
-
-          VAL="${{ github.event.inputs.db_password }}"
-          VAL="${VAL:-${{ secrets.DB_PASSWORD }}}"
-          VAL="${VAL:-123456}"
-          echo "DB_PASSWORD=$VAL" >> $GITHUB_ENV
 
           VAL="${{ github.event.inputs.db_database }}"
           VAL="${VAL:-${{ secrets.DB_DATABASE }}}"
@@ -173,9 +167,9 @@ jobs:
           echo "GVA_BASE_URL=$GVA_BASE_URL"
           echo "DB_HOST=$DB_HOST DB_PORT=$DB_PORT DB_USER=$DB_USER DB_DATABASE=$DB_DATABASE"
           echo "ADMIN_USERNAME=$ADMIN_USERNAME"
-          py -c "from config.settings import settings; print('base_url=', settings.base_url)"
+          python -c "from config.settings import settings; print('base_url=', settings.base_url)"
 
-      - name: Probe GVA reachability (graceful skip if GVA is down)
+      - name: Probe GVA reachability
         shell: bash
         run: |
           echo "Probing GVA at $GVA_BASE_URL ..."
@@ -193,7 +187,7 @@ jobs:
       - name: Run tests
         if: env.GVA_REACHABLE != 'false'
         shell: bash
-        run: py -m pytest -v --alluredir=reports/allure-results
+        run: python -m pytest -v --alluredir=reports/allure-results
 
       - name: Upload Allure results
         if: always() && env.GVA_REACHABLE != 'false'
