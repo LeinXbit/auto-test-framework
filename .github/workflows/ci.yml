@@ -2,7 +2,22 @@ name: Auto Test CI
 
 # Two-stage CI pipeline:
 #   1. static-check  : always runs on push/PR, fast, no GVA needed
-#   2. integration   : manual or scheduled, builds GVA from source in CI
+#                      validates YAML, imports and pytest collection
+#   2. integration   : two deployment modes (pick one at "Run workflow" dialog)
+#        Mode A (selfhosted) : self-hosted runner, connects to an already-running
+#                              GVA via filled-in inputs (gva_base_url + db_password)
+#        Mode B (github-built): github-hosted ubuntu-latest, builds GVA from source
+#                              inside CI using docker-compose.ci.yml (no external deps)
+#
+# Repository Secrets (Mode A uses these if inputs are empty):
+#   GVA_BASE_URL     e.g. http://10.0.0.1:8888 (point at reachable GVA)
+#   DB_PASSWORD      root password of the GVA MySQL instance
+#   DB_HOST          (optional, default: 127.0.0.1)
+#   DB_PORT          (optional, default: 3306)
+#   DB_USER          (optional, default: root)
+#   DB_DATABASE      (optional, default: gva)
+#   ADMIN_USERNAME   (optional, default: admin)
+#   ADMIN_PASSWORD   (optional, default: 123456)
 
 on:
   push:
@@ -11,10 +26,53 @@ on:
     branches: [main, master]
   workflow_dispatch:
     inputs:
+      runner_mode:
+        description: 'Integration runner mode: selfhosted = connect to existing GVA, github-built = build GVA in CI'
+        required: true
+        default: 'selfhosted'
+        type: choice
+        options:
+          - selfhosted
+          - github-built
+      selfhosted_runner_label:
+        description: '(selfhosted mode) Self-hosted runner label (default: self-hosted)'
+        required: false
+        default: 'self-hosted'
       gva_base_url:
-        description: 'Override GVA base URL (leave empty to use CI-built GVA)'
+        description: '(selfhosted mode) GVA base URL, e.g. http://127.0.0.1:8888'
         required: false
         default: ''
+      db_host:
+        description: '(selfhosted mode) MySQL host (default 127.0.0.1)'
+        required: false
+        default: ''
+      db_port:
+        description: '(selfhosted mode) MySQL port (default 3306)'
+        required: false
+        default: ''
+      db_user:
+        description: '(selfhosted mode) MySQL user (default root)'
+        required: false
+        default: ''
+      db_password:
+        description: '(selfhosted mode) MySQL password (default: use Secret or 123456)'
+        required: false
+        default: ''
+      db_database:
+        description: '(selfhosted mode) MySQL database name (default gva)'
+        required: false
+        default: ''
+      admin_username:
+        description: '(selfhosted mode) GVA admin username (default admin)'
+        required: false
+        default: ''
+      admin_password:
+        description: '(selfhosted mode) GVA admin password (default: use Secret or 123456)'
+        required: false
+        default: ''
+  schedule:
+    # Nightly (02:00 UTC = 10:00 GMT+8): defaults to selfhosted mode using Secrets
+    - cron: '0 2 * * *'
 
 env:
   PYTHONPATH: .vendor
@@ -46,15 +104,130 @@ jobs:
           python -c "import yaml; yaml.safe_load(open('data/test_data.yaml', encoding='utf-8')); print('test_data.yaml OK')"
 
       - name: Pytest collection (no execution, validates imports/fixtures)
+        # python -m pytest: works with pip --target .vendor without needing .vendor/bin in PATH
         run: python -m pytest --collect-only -q
 
       - name: Compile all Python files (syntax check)
         run: python -m compileall -q api config db utils testcases
 
-  integration:
-    name: Integration Tests (GVA built from source)
+  # =========================================================================
+  # Mode A: selfhosted - connect self-hosted runner to an already-running GVA
+  # =========================================================================
+  integration-selfhosted:
+    name: Integration (selfhosted -> existing GVA)
+    if: >-
+      (github.event_name == 'schedule') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.runner_mode == 'selfhosted')
+    runs-on: ${{ github.event.inputs.selfhosted_runner_label || 'self-hosted' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python (skip if already present on self-hosted runner)
+        uses: actions/setup-python@v5
+        continue-on-error: true
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies to .vendor
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --target .vendor -r requirements.txt
+
+      - name: Resolve connection env vars (input > secret > default)
+        shell: bash
+        run: |
+          # ---- GVA base URL ----
+          VAL="${{ github.event.inputs.gva_base_url }}"
+          VAL="${VAL:-${{ secrets.GVA_BASE_URL }}}"
+          VAL="${VAL:-http://127.0.0.1:8888}"
+          echo "GVA_BASE_URL=$VAL" >> $GITHUB_ENV
+          echo "Using GVA_BASE_URL=$VAL"
+
+          # ---- DB host ----
+          VAL="${{ github.event.inputs.db_host }}"
+          VAL="${VAL:-${{ secrets.DB_HOST }}}"
+          VAL="${VAL:-127.0.0.1}"
+          echo "DB_HOST=$VAL" >> $GITHUB_ENV
+
+          # ---- DB port ----
+          VAL="${{ github.event.inputs.db_port }}"
+          VAL="${VAL:-${{ secrets.DB_PORT }}}"
+          VAL="${VAL:-3306}"
+          echo "DB_PORT=$VAL" >> $GITHUB_ENV
+
+          # ---- DB user ----
+          VAL="${{ github.event.inputs.db_user }}"
+          VAL="${VAL:-${{ secrets.DB_USER }}}"
+          VAL="${VAL:-root}"
+          echo "DB_USER=$VAL" >> $GITHUB_ENV
+
+          # ---- DB password ----
+          VAL="${{ github.event.inputs.db_password }}"
+          VAL="${VAL:-${{ secrets.DB_PASSWORD }}}"
+          VAL="${VAL:-123456}"
+          echo "DB_PASSWORD=$VAL" >> $GITHUB_ENV
+
+          # ---- DB database name ----
+          VAL="${{ github.event.inputs.db_database }}"
+          VAL="${VAL:-${{ secrets.DB_DATABASE }}}"
+          VAL="${VAL:-gva}"
+          echo "DB_DATABASE=$VAL" >> $GITHUB_ENV
+
+          # ---- admin username ----
+          VAL="${{ github.event.inputs.admin_username }}"
+          VAL="${VAL:-${{ secrets.ADMIN_USERNAME }}}"
+          VAL="${VAL:-admin}"
+          echo "ADMIN_USERNAME=$VAL" >> $GITHUB_ENV
+
+          # ---- admin password ----
+          VAL="${{ github.event.inputs.admin_password }}"
+          VAL="${VAL:-${{ secrets.ADMIN_PASSWORD }}}"
+          VAL="${VAL:-123456}"
+          echo "ADMIN_PASSWORD=$VAL" >> $GITHUB_ENV
+
+      - name: Show resolved config
+        run: |
+          echo "GVA_BASE_URL=$GVA_BASE_URL"
+          echo "DB_HOST=$DB_HOST DB_PORT=$DB_PORT DB_USER=$DB_USER DB_DATABASE=$DB_DATABASE"
+          echo "ADMIN_USERNAME=$ADMIN_USERNAME"
+          python -c "from config.settings import settings; print('base_url=', settings.base_url)"
+
+      - name: Probe GVA reachability (graceful skip if GVA is down)
+        run: |
+          echo "Probing GVA at $GVA_BASE_URL ..."
+          for i in $(seq 1 30); do
+            if curl -sf --max-time 5 "$GVA_BASE_URL/swagger/index.html" -o /dev/null; then
+              echo "GVA is reachable"
+              exit 0
+            fi
+            echo "Waiting for GVA... ($i/30)"
+            sleep 5
+          done
+          echo "::warning::GVA not reachable at $GVA_BASE_URL, skipping integration tests"
+          echo "GVA_REACHABLE=false" >> $GITHUB_ENV
+
+      - name: Run tests
+        if: env.GVA_REACHABLE != 'false'
+        run: python -m pytest -v --alluredir=reports/allure-results
+
+      - name: Upload Allure results
+        if: always() && env.GVA_REACHABLE != 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-selfhosted
+          path: reports/allure-results
+          if-no-files-found: warn
+
+  # =========================================================================
+  # Mode B: github-built - build GVA from source inside the github-hosted CI
+  # =========================================================================
+  integration-github-built:
+    name: Integration (github-hosted, GVA built from source)
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.runner_mode == 'github-built'
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
 
     steps:
       - name: Checkout test framework
@@ -71,7 +244,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --target .vendor -r requirements.txt
 
-      #  构建 GVA 服务栈
+      # ----- Build GVA service stack (mysql + redis + gva-server from source) -----
 
       - name: Clone GVA source code
         run: |
@@ -98,21 +271,19 @@ jobs:
           docker compose -f .github/docker-compose.ci.yml logs gva-server
           exit 1
 
-      #  配置测试环境
+      # ----- Configure test env for the CI-built stack -----
 
       - name: Set up environment variables
         run: |
-          GVA_BASE_URL="${{ github.event.inputs.gva_base_url }}"
-          if [ -z "$GVA_BASE_URL" ]; then
-            GVA_BASE_URL="http://127.0.0.1:8888"
-          fi
-          echo "GVA_BASE_URL=$GVA_BASE_URL" >> $GITHUB_ENV
-
-          echo "DB_PASSWORD=123456" >> $GITHUB_ENV
+          # Use the GVA built by docker-compose.ci.yml (localhost within the job)
+          echo "GVA_BASE_URL=http://127.0.0.1:8888" >> $GITHUB_ENV
+          # DB container is reachable at host 127.0.0.1 port 3306
           echo "DB_HOST=127.0.0.1" >> $GITHUB_ENV
           echo "DB_PORT=3306" >> $GITHUB_ENV
           echo "DB_USER=root" >> $GITHUB_ENV
+          echo "DB_PASSWORD=123456" >> $GITHUB_ENV
           echo "DB_DATABASE=gva" >> $GITHUB_ENV
+          # GVA seed account
           echo "ADMIN_USERNAME=admin" >> $GITHUB_ENV
           echo "ADMIN_PASSWORD=123456" >> $GITHUB_ENV
 
@@ -122,16 +293,14 @@ jobs:
           echo "DB_HOST=$DB_HOST DB_DATABASE=$DB_DATABASE DB_USER=$DB_USER"
           python -c "from config.settings import settings; print('base_url=', settings.base_url)"
 
-      #  运行测试
-
-      - name: Run integration tests
+      - name: Run tests
         run: python -m pytest -v --alluredir=reports/allure-results
 
       - name: Upload Allure results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: allure-results
+          name: allure-results-github-built
           path: reports/allure-results
           if-no-files-found: warn
 
