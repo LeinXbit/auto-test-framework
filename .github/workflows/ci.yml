@@ -2,18 +2,7 @@ name: Auto Test CI
 
 # Two-stage CI pipeline:
 #   1. static-check  : always runs on push/PR, fast, no GVA needed
-#                      validates YAML, imports and pytest collection
-#   2. integration    : manual or scheduled, needs a reachable GVA service
-#                      (staging URL via GVA_BASE_URL secret or self-hosted runner)
-# GVA has no official prebuilt Docker image, so SUT is deployed separately
-# (see .github/docker-compose.ci.yml for a self-contained build-from-source option)
-#
-# Required GitHub Secrets (Settings -> Secrets and variables -> Actions):
-#   GVA_BASE_URL   e.g. http://10.0.0.1:8888 (point at reachable GVA)
-#   DB_PASSWORD    root password of the GVA MySQL instance
-#   DB_DATABASE    (optional, default: gva)
-#   ADMIN_USERNAME (optional, default: admin)
-#   ADMIN_PASSWORD (optional, default: 123456)
+#   2. integration   : manual or scheduled, builds GVA from source in CI
 
 on:
   push:
@@ -23,11 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       gva_base_url:
-        description: 'GVA base URL for integration tests (e.g. http://10.0.0.1:8888)'
-        required: false
-        default: ''
-      db_password:
-        description: 'GVA MySQL root password (optional, defaults to Secret or 123456)'
+        description: 'Override GVA base URL (leave empty to use CI-built GVA)'
         required: false
         default: ''
 
@@ -61,37 +46,20 @@ jobs:
           python -c "import yaml; yaml.safe_load(open('data/test_data.yaml', encoding='utf-8')); print('test_data.yaml OK')"
 
       - name: Pytest collection (no execution, validates imports/fixtures)
-        # Use python -m pytest because pip --target installs scripts to .vendor/bin
-        # which is not in PATH. PYTHONPATH=.vendor (set at workflow env level)
-        # lets Python find the pytest module inside .vendor.
         run: python -m pytest --collect-only -q
 
       - name: Compile all Python files (syntax check)
         run: python -m compileall -q api config db utils testcases
 
   integration:
-    name: Integration Tests (needs GVA)
+    name: Integration Tests (GVA built from source)
     runs-on: ubuntu-latest
-    # Integration needs a reachable GVA, only run on manual/schedule
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-    # MySQL services container: healthcheck must use literal strings
-    # (GitHub Actions does not allow ${{ secrets.* }} substitution inside services.options
-    #  and services.env; hard-coded defaults match .env.example defaults.)
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: 123456
-          MYSQL_DATABASE: gva
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -p123456"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
+
+    # 移除 services.mysql,由 docker-compose.ci.yml 统一管理
+
     steps:
-      - name: Checkout code
+      - name: Checkout test framework
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -105,64 +73,76 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --target .vendor -r requirements.txt
 
-      - name: Resolve environment variables (input > secret > default)
+      # 构建 GVA 服务栈
+
+      - name: Clone GVA source code
         run: |
-          # Bash fallback chain: workflow input -> Secret -> built-in default
+          git clone --depth 1 https://github.com/flipped-aurora/gin-vue-admin.git gva-source
+          ls -la gva-source/server/
+
+      - name: Start GVA stack with Docker Compose
+        run: |
+          docker compose -f docker-compose.ci.yml up -d --wait
+          docker compose -f docker-compose.ci.yml ps
+
+      - name: Wait for GVA to be ready
+        run: |
+          echo "Waiting for GVA server to be ready..."
+          for i in $(seq 1 60); do
+            if curl -sf --max-time 5 "http://127.0.0.1:8888/swagger/index.html" -o /dev/null; then
+              echo "GVA is ready"
+              exit 0
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 5
+          done
+          echo "GVA failed to start"
+          docker compose -f docker-compose.ci.yml logs gva-server
+          exit 1
+
+      #  配置测试环境
+
+      - name: Set up environment variables
+        run: |
           GVA_BASE_URL="${{ github.event.inputs.gva_base_url }}"
-          GVA_BASE_URL="${GVA_BASE_URL:-${{ secrets.GVA_BASE_URL }}}"
-          GVA_BASE_URL="${GVA_BASE_URL:-http://127.0.0.1:8888}"
+          if [ -z "$GVA_BASE_URL" ]; then
+            GVA_BASE_URL="http://127.0.0.1:8888"
+          fi
           echo "GVA_BASE_URL=$GVA_BASE_URL" >> $GITHUB_ENV
-
-          DB_PASSWORD="${{ github.event.inputs.db_password }}"
-          DB_PASSWORD="${DB_PASSWORD:-${{ secrets.DB_PASSWORD }}}"
-          DB_PASSWORD="${DB_PASSWORD:-123456}"
-          echo "DB_PASSWORD=$DB_PASSWORD" >> $GITHUB_ENV
-
-          DB_DATABASE="${{ secrets.DB_DATABASE }}"
-          DB_DATABASE="${DB_DATABASE:-gva}"
-          echo "DB_DATABASE=$DB_DATABASE" >> $GITHUB_ENV
-
-          ADMIN_USERNAME="${{ secrets.ADMIN_USERNAME }}"
-          ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
-          echo "ADMIN_USERNAME=$ADMIN_USERNAME" >> $GITHUB_ENV
-
-          ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}"
-          ADMIN_PASSWORD="${ADMIN_PASSWORD:-123456}"
-          echo "ADMIN_PASSWORD=$ADMIN_PASSWORD" >> $GITHUB_ENV
-
+          
+          echo "DB_PASSWORD=123456" >> $GITHUB_ENV
           echo "DB_HOST=127.0.0.1" >> $GITHUB_ENV
           echo "DB_PORT=3306" >> $GITHUB_ENV
           echo "DB_USER=root" >> $GITHUB_ENV
+          echo "DB_DATABASE=gva" >> $GITHUB_ENV
+          echo "ADMIN_USERNAME=admin" >> $GITHUB_ENV
+          echo "ADMIN_PASSWORD=123456" >> $GITHUB_ENV
 
-      - name: Show resolved config (secrets masked)
+      - name: Show resolved config
         run: |
           echo "GVA_BASE_URL=$GVA_BASE_URL"
           echo "DB_HOST=$DB_HOST DB_DATABASE=$DB_DATABASE DB_USER=$DB_USER"
           python -c "from config.settings import settings; print('base_url=', settings.base_url)"
 
-      - name: Probe GVA reachability (skip gracefully if GVA is down)
-        run: |
-          echo "Probing GVA at $GVA_BASE_URL ..."
-          for i in $(seq 1 30); do
-            if curl -sf --max-time 5 "$GVA_BASE_URL/swagger/index.html" -o /dev/null; then
-              echo "GVA is reachable"
-              exit 0
-            fi
-            echo "Waiting for GVA... ($i/30)"
-            sleep 5
-          done
-          echo "::warning::GVA not reachable at $GVA_BASE_URL, skipping integration tests"
-          echo "GVA_REACHABLE=false" >> $GITHUB_ENV
+      #  运行测试
 
-      - name: Run tests
-        if: env.GVA_REACHABLE != 'false'
-        # python -m pytest: works with pip --target .vendor without needing .vendor/bin in PATH
+      - name: Run integration tests
         run: python -m pytest -v --alluredir=reports/allure-results
 
       - name: Upload Allure results
-        if: always() && env.GVA_REACHABLE != 'false'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: allure-results
           path: reports/allure-results
           if-no-files-found: warn
+
+      - name: Show GVA logs (if tests failed)
+        if: failure()
+        run: |
+          echo "=== GVA Server Logs ==="
+          docker compose -f docker-compose.ci.yml logs gva-server --tail=50
+          echo "=== MySQL Logs ==="
+          docker compose -f docker-compose.ci.yml logs mysql --tail=20
+          echo "=== Redis Logs ==="
+          docker compose -f docker-compose.ci.yml logs redis --tail=20
