@@ -52,7 +52,7 @@ jobs:
       - name: Install dependencies to .vendor
         run: |
           python -m pip install --upgrade pip
-          pip install --target .vendor -r requirements.txt
+          python -m pip install --target .vendor -r requirements.txt
 
       - name: Validate YAML configs
         run: |
@@ -61,7 +61,10 @@ jobs:
           python -c "import yaml; yaml.safe_load(open('data/test_data.yaml', encoding='utf-8')); print('test_data.yaml OK')"
 
       - name: Pytest collection (no execution, validates imports/fixtures)
-        run: pytest --collect-only -q
+        # Use python -m pytest because pip --target installs scripts to .vendor/bin
+        # which is not in PATH. PYTHONPATH=.vendor (set at workflow env level)
+        # lets Python find the pytest module inside .vendor.
+        run: python -m pytest --collect-only -q
 
       - name: Compile all Python files (syntax check)
         run: python -m compileall -q api config db utils testcases
@@ -100,7 +103,7 @@ jobs:
       - name: Install dependencies to .vendor
         run: |
           python -m pip install --upgrade pip
-          pip install --target .vendor -r requirements.txt
+          python -m pip install --target .vendor -r requirements.txt
 
       - name: Resolve environment variables (input > secret > default)
         run: |
@@ -153,7 +156,8 @@ jobs:
 
       - name: Run tests
         if: env.GVA_REACHABLE != 'false'
-        run: pytest -v --alluredir=reports/allure-results
+        # python -m pytest: works with pip --target .vendor without needing .vendor/bin in PATH
+        run: python -m pytest -v --alluredir=reports/allure-results
 
       - name: Upload Allure results
         if: always() && env.GVA_REACHABLE != 'false'
