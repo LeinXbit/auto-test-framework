@@ -47,7 +47,7 @@ services:
 
   gva-server:
     build:
-      context: ./gva-source/server
+      context: ../gva-source/server
       dockerfile: Dockerfile
     container_name: gva-ci-server
     ports:
