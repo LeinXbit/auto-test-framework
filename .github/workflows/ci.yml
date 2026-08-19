@@ -70,9 +70,6 @@ on:
         description: '(selfhosted mode) GVA admin password (default: use Secret or 123456)'
         required: false
         default: ''
-  schedule:
-    # Nightly (02:00 UTC = 10:00 GMT+8): defaults to selfhosted mode using Secrets
-    - cron: '0 2 * * *'
 
 env:
   PYTHONPATH: .vendor
@@ -104,7 +101,6 @@ jobs:
           python -c "import yaml; yaml.safe_load(open('data/test_data.yaml', encoding='utf-8')); print('test_data.yaml OK')"
 
       - name: Pytest collection (no execution, validates imports/fixtures)
-        # python -m pytest: works with pip --target .vendor without needing .vendor/bin in PATH
         run: python -m pytest --collect-only -q
 
       - name: Compile all Python files (syntax check)
@@ -115,21 +111,12 @@ jobs:
   # =========================================================================
   integration-selfhosted:
     name: Integration (selfhosted -> existing GVA)
-    if: >-
-      (github.event_name == 'schedule') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.runner_mode == 'selfhosted')
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.runner_mode == 'selfhosted'
     runs-on: ${{ github.event.inputs.selfhosted_runner_label || 'self-hosted' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Set up Python (skip if already present on self-hosted runner)
-        uses: actions/setup-python@v5
-        continue-on-error: true
-        with:
-          python-version: '3.11'
-          cache: 'pip'
 
       - name: Install dependencies to .vendor
         run: |
@@ -139,56 +126,49 @@ jobs:
       - name: Resolve connection env vars (input > secret > default)
         shell: bash
         run: |
-          # ---- GVA base URL ----
           VAL="${{ github.event.inputs.gva_base_url }}"
           VAL="${VAL:-${{ secrets.GVA_BASE_URL }}}"
           VAL="${VAL:-http://127.0.0.1:8888}"
           echo "GVA_BASE_URL=$VAL" >> $GITHUB_ENV
           echo "Using GVA_BASE_URL=$VAL"
 
-          # ---- DB host ----
           VAL="${{ github.event.inputs.db_host }}"
           VAL="${VAL:-${{ secrets.DB_HOST }}}"
           VAL="${VAL:-127.0.0.1}"
           echo "DB_HOST=$VAL" >> $GITHUB_ENV
 
-          # ---- DB port ----
           VAL="${{ github.event.inputs.db_port }}"
           VAL="${VAL:-${{ secrets.DB_PORT }}}"
           VAL="${VAL:-3306}"
           echo "DB_PORT=$VAL" >> $GITHUB_ENV
 
-          # ---- DB user ----
           VAL="${{ github.event.inputs.db_user }}"
           VAL="${VAL:-${{ secrets.DB_USER }}}"
           VAL="${VAL:-root}"
           echo "DB_USER=$VAL" >> $GITHUB_ENV
 
-          # ---- DB password ----
           VAL="${{ github.event.inputs.db_password }}"
           VAL="${VAL:-${{ secrets.DB_PASSWORD }}}"
           VAL="${VAL:-123456}"
           echo "DB_PASSWORD=$VAL" >> $GITHUB_ENV
 
-          # ---- DB database name ----
           VAL="${{ github.event.inputs.db_database }}"
           VAL="${VAL:-${{ secrets.DB_DATABASE }}}"
           VAL="${VAL:-gva}"
           echo "DB_DATABASE=$VAL" >> $GITHUB_ENV
 
-          # ---- admin username ----
           VAL="${{ github.event.inputs.admin_username }}"
           VAL="${VAL:-${{ secrets.ADMIN_USERNAME }}}"
           VAL="${VAL:-admin}"
           echo "ADMIN_USERNAME=$VAL" >> $GITHUB_ENV
 
-          # ---- admin password ----
           VAL="${{ github.event.inputs.admin_password }}"
           VAL="${VAL:-${{ secrets.ADMIN_PASSWORD }}}"
           VAL="${VAL:-123456}"
           echo "ADMIN_PASSWORD=$VAL" >> $GITHUB_ENV
 
       - name: Show resolved config
+        shell: bash
         run: |
           echo "GVA_BASE_URL=$GVA_BASE_URL"
           echo "DB_HOST=$DB_HOST DB_PORT=$DB_PORT DB_USER=$DB_USER DB_DATABASE=$DB_DATABASE"
@@ -196,6 +176,7 @@ jobs:
           python -c "from config.settings import settings; print('base_url=', settings.base_url)"
 
       - name: Probe GVA reachability (graceful skip if GVA is down)
+        shell: bash
         run: |
           echo "Probing GVA at $GVA_BASE_URL ..."
           for i in $(seq 1 30); do
@@ -211,6 +192,7 @@ jobs:
 
       - name: Run tests
         if: env.GVA_REACHABLE != 'false'
+        shell: bash
         run: python -m pytest -v --alluredir=reports/allure-results
 
       - name: Upload Allure results
@@ -275,15 +257,12 @@ jobs:
 
       - name: Set up environment variables
         run: |
-          # Use the GVA built by docker-compose.ci.yml (localhost within the job)
           echo "GVA_BASE_URL=http://127.0.0.1:8888" >> $GITHUB_ENV
-          # DB container is reachable at host 127.0.0.1 port 3306
           echo "DB_HOST=127.0.0.1" >> $GITHUB_ENV
           echo "DB_PORT=3306" >> $GITHUB_ENV
           echo "DB_USER=root" >> $GITHUB_ENV
           echo "DB_PASSWORD=123456" >> $GITHUB_ENV
           echo "DB_DATABASE=gva" >> $GITHUB_ENV
-          # GVA seed account
           echo "ADMIN_USERNAME=admin" >> $GITHUB_ENV
           echo "ADMIN_PASSWORD=123456" >> $GITHUB_ENV
 
