@@ -120,8 +120,8 @@ jobs:
 
       - name: Install dependencies to .vendor
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install --target .vendor -r requirements.txt
+          py -m pip install --upgrade pip
+          py -m pip install --target .vendor -r requirements.txt
 
       - name: Resolve connection env vars (input > secret > default)
         shell: bash
@@ -173,7 +173,7 @@ jobs:
           echo "GVA_BASE_URL=$GVA_BASE_URL"
           echo "DB_HOST=$DB_HOST DB_PORT=$DB_PORT DB_USER=$DB_USER DB_DATABASE=$DB_DATABASE"
           echo "ADMIN_USERNAME=$ADMIN_USERNAME"
-          python -c "from config.settings import settings; print('base_url=', settings.base_url)"
+          py -c "from config.settings import settings; print('base_url=', settings.base_url)"
 
       - name: Probe GVA reachability (graceful skip if GVA is down)
         shell: bash
@@ -193,7 +193,7 @@ jobs:
       - name: Run tests
         if: env.GVA_REACHABLE != 'false'
         shell: bash
-        run: python -m pytest -v --alluredir=reports/allure-results
+        run: py -m pytest -v --alluredir=reports/allure-results
 
       - name: Upload Allure results
         if: always() && env.GVA_REACHABLE != 'false'
