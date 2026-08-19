@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 GVA auth module API wrapper
+    - Init DB check /init/checkdb
+    - Init DB create /init/initdb
     - Get captcha   /base/captcha
     - Login         /base/login
     - Logout (JWT blacklisted) /jwt/jsonInBlacklist
@@ -129,3 +131,44 @@ class AuthApi(BaseApi):
         resp = self.get("/user/getUserInfo")
         self.assert_business_success(resp)
         return resp.json()["data"]["userInfo"]
+
+    # Init DB (bootstrapping, runs WITHOUT token)
+
+    def check_db(self):
+        """
+        Check whether GVA database has been initialized (POST /init/checkdb).
+        Returns the raw Response object. Caller inspects code/msg to decide
+        if initdb is needed. Typical behavior:
+            - code=0 + data.code=1 -> DB already initialized, redirect to /login
+            - code=0 + data.code=0 -> DB not initialized, call initdb next
+            - code=7 -> already initialized, msg usually something like '已初始化'
+        """
+        return self.post("/init/checkdb", json={})
+
+    def init_db(self, admin_password, db_name,
+                host="127.0.0.1", port="3306", user_name="root",
+                password="", db_type="mysql", db_path="", template=""):
+        """
+        Initialize GVA database (POST /init/initdb, request.InitDB schema).
+        Runs WITHOUT authentication.
+        Required fields by GVA: adminPassword, dbName
+        Defaults match local GVA config.
+        :return: requests.Response
+        """
+        payload = {
+            "adminPassword": admin_password,
+            "dbName": db_name,
+            "host": host,
+            "port": str(port),
+            "userName": user_name,
+            "password": password,
+            "dbType": db_type,
+            "dbPath": db_path,
+            "template": template,
+        }
+        logger.info(
+            "初始化数据库: dbType={}, host={}:{}, dbName={}, user={}".format(
+                db_type, host, port, db_name, user_name,
+            )
+        )
+        return self.post("/init/initdb", json=payload)
