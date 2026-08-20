@@ -41,7 +41,6 @@ auto-test-framework/
 ├── requirements.txt
 ├── Dockerfile             # Python 3.11 slim 镜像
 ├── docker-compose.yml
-├── Jenkinsfile            # Jenkins CI 流水线
 └── .github/workflows/ci.yml  # GitHub Actions (selfhosted + github-built 双模式)
 
 ```
