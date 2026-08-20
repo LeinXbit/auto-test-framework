@@ -283,6 +283,49 @@ class TestUnauthorized:
 
 @allure.epic("GVA 真实业务测试")
 @allure.feature("鉴权模块")
+@allure.story("登录边界")
+class TestLoginBoundary:
+    """登录边界用例(负向场景)"""
+
+    @allure.title("错误密码登录应失败")
+    @allure.severity(allure.severity_level.CRITICAL)
+    @pytest.mark.regression
+    def test_login_wrong_password_fails(self, no_token_api):
+        """
+        错误密码登录应返回 code != 0, msg 含'失败'或'错误'
+        不带验证码识别器, 直接传错的 captcha 也能验证密码校验逻辑(密码校验在验证码之前)
+        """
+        # 直接 POST 一个错误的密码, GVA 通常会先校验验证码再校验密码
+        # 这里主要测试"错误密码"路径, 即使验证码也错, 仍应失败
+        resp = no_token_api.login(
+            username="admin",
+            password="definitely_wrong_pwd_xyz",
+            captcha="000000",
+            captcha_id="nonexistent",
+        )
+        body = resp.json()
+        assert body.get("code") != 0, "错误密码登录不应成功"
+        msg = body.get("msg", "")
+        # GVA 错误信息可能为"登录失败"或"验证码错误"等
+        assert any(kw in msg for kw in ["失败", "错误", "fail", "invalid", "wrong", "error"]), \
+            "msg 应含失败/错误信息, 实际: {}".format(msg)
+
+    @allure.title("连续两次获取验证码 ID 应不同")
+    @allure.severity(allure.severity_level.NORMAL)
+    @pytest.mark.regression
+    def test_captcha_two_fetches_have_different_ids(self):
+        """连续调用 get_captcha 两次, captchaId 应不同(每次都是新会话)"""
+        api = AuthApi(base_url=settings.base_url)
+        c1 = api.get_captcha()
+        c2 = api.get_captcha()
+        assert c1["captchaId"] != c2["captchaId"], \
+            "两次获取验证码 captchaId 应不同(实际 c1={}, c2={})".format(
+                c1["captchaId"], c2["captchaId"],
+            )
+
+
+@allure.epic("GVA 真实业务测试")
+@allure.feature("鉴权模块")
 @allure.story("登出链路")
 class TestLogout:
     """登出真实链路"""

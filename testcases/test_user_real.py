@@ -11,6 +11,8 @@ GVA 用户模块 CRUD 真实测试
 4. changePassword 路由是 POST(非 PUT), 且校验 token 持有者密码
 5. deleteUser 对部分角色组合返回"权限不足", 由 fixture DB 兜底
 """
+import uuid
+
 import allure
 import pytest
 
@@ -293,3 +295,89 @@ class TestChangePassword:
             # 恢复 admin token(供 temp_user fixture teardown 调 delete_user 用)
             # 不做 OCR 登录: 直接从 admin_token holder 取(已惰性刷新保证可用)
             user_api.set_token(admin_token.ensure())
+
+
+@allure.epic("GVA 真实业务测试")
+@allure.feature("用户模块")
+@allure.story("用户自服务")
+class TestUserSelfService:
+    """User self-service operations (setSelfInfo / resetPassword / setUserAuthorities)"""
+
+    @allure.title("setSelfInfo 修改当前用户昵称应成功")
+    @allure.severity(allure.severity_level.CRITICAL)
+    @pytest.mark.regression
+    @pytest.mark.api
+    def test_set_self_info_updates_nick(self, user_api, temp_user, admin_token):
+        """
+        setSelfInfo (PUT /user/SetSelfInfo) updates the token holder's info.
+        Because the token holder is admin (not temp_user), we update admin's
+        own nickName and verify. Skip if the API doesn't allow this path.
+        """
+        # Get admin user ID
+        from api.auth_api import AuthApi
+        auth = AuthApi(base_url=user_api.base_url, timeout=user_api.timeout)
+        auth.set_token(admin_token.ensure())
+        info = auth.get_self_info()
+        admin_id = info.get("ID")
+        if admin_id is None:
+            pytest.skip("无法获取 admin 用户 ID")
+        original_nick = info.get("nickName") or "admin"
+        new_nick = "pytest_admin_{}".format(uuid.uuid4().hex[:6])
+
+        try:
+            resp = user_api.set_self_info(admin_id, nick_name=new_nick)
+            body = resp.json()
+            # GVA admin role (9528) may lack casbin permission for setSelfInfo
+            if body.get("code") == 7 and "权限" in (body.get("msg") or ""):
+                pytest.skip("admin 角色缺少 setSelfInfo 权限, 跳过该用例")
+            assert body["code"] == 0, "setSelfInfo 失败: {}".format(body)
+            # Verify by re-fetching self info
+            new_info = auth.get_self_info()
+            assert new_info.get("nickName") == new_nick, \
+                "昵称应已更新, 实际: {}".format(new_info.get("nickName"))
+        finally:
+            # Restore original nickName
+            try:
+                user_api.set_self_info(admin_id, nick_name=original_nick)
+            except Exception:
+                pass
+
+    @allure.title("resetPassword 重置临时用户密码为默认值")
+    @allure.severity(allure.severity_level.CRITICAL)
+    @pytest.mark.regression
+    @pytest.mark.api
+    def test_reset_password_to_default(self, user_api, temp_user):
+        """
+        resetPassword (POST /user/resetPassword) resets the user's password
+        to GVA default '123456'. We verify the reset returns code=0.
+        """
+        user_id = temp_user["ID"]
+        resp = user_api.reset_password(user_id)
+        body = resp.json()
+        # GVA admin role (9528) may lack casbin permission for resetPassword
+        if body.get("code") == 7 and "权限" in (body.get("msg") or ""):
+            pytest.skip("admin 角色缺少 resetPassword 权限, 跳过该用例")
+        assert body["code"] == 0, "resetPassword 失败: {}".format(body)
+
+    @allure.title("setUserAuthorities 为临时用户设置多角色")
+    @allure.severity(allure.severity_level.CRITICAL)
+    @pytest.mark.regression
+    @pytest.mark.api
+    def test_set_user_authorities_multiple_roles(self, user_api, temp_user, temp_authority):
+        """
+        setUserAuthorities (plural) sets multiple roles for a user via UUID.
+        We assign [888, temp_authority.authorityId] to temp_user and verify
+        the API returns code=0.
+        """
+        user_uuid = temp_user.get("uuid")
+        if not user_uuid:
+            pytest.skip("临时用户无 uuid 字段, 跳过")
+        resp = user_api.set_user_authorities(
+            user_uuid=user_uuid,
+            authority_ids=[888, temp_authority["authorityId"]],
+        )
+        body = resp.json()
+        # GVA admin role (9528) may lack casbin permission for setUserAuthorities
+        if body.get("code") == 7 and "权限" in (body.get("msg") or ""):
+            pytest.skip("admin 角色缺少 setUserAuthorities 权限, 跳过该用例")
+        assert body["code"] == 0, "setUserAuthorities 失败: {}".format(body)

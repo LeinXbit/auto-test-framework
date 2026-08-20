@@ -70,3 +70,35 @@ class UserApi(BaseApi):
             "newPassword": new_password,
         }
         return self.post("/user/changePassword", json=payload)
+
+    # Self info and admin operations
+
+    def set_self_info(self, user_id, nick_name=None, header_img=None, **extra):
+        """Set current user (token holder) info: PUT /user/setSelfInfo
+        Note: GVA registers the route as /user/setSelfInfo (lowercase s in 'set'),
+        even though the swagger doc shows /user/SetSelfInfo. Only fields present
+        in the body are updated.
+        """
+        payload = {"ID": int(user_id)}
+        if nick_name is not None:
+            payload["nickName"] = nick_name
+        if header_img is not None:
+            payload["headerImg"] = header_img
+        payload.update(extra)
+        return self.put("/user/setSelfInfo", json=payload)
+
+    def reset_password(self, user_id):
+        """Admin resets a user's password to default: POST /user/resetPassword
+        GVA resets the password to '123456' by default.
+        """
+        return self.post("/user/resetPassword", json={"ID": int(user_id)})
+
+    def set_user_authorities(self, user_uuid, authority_ids):
+        """Set multiple roles for a user (plural): POST /user/setUserAuthorities
+        :param user_uuid: the UUID string of the user (not the numeric ID)
+        :param authority_ids: list of role IDs
+        """
+        return self.post("/user/setUserAuthorities", json={
+            "uuid": user_uuid,
+            "authorityIds": [int(a) for a in authority_ids],
+        })

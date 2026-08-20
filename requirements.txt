@@ -5,3 +5,4 @@ requests
 PyYAML
 PyMySQL
 ddddocr
+cryptography

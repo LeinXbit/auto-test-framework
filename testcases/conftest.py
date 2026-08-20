@@ -35,6 +35,10 @@ import pytest
 from api.auth_api import AuthApi
 from api.authority_api import AuthorityApi
 from api.user_api import UserApi
+from api.menu_api import MenuApi
+from api.system_api import SystemApi
+from api.file_api import FileApi
+from api.sysop_api import SysOpApi
 from config.settings import settings
 from db.mysql_client import MySQLClient
 from utils.captcha_solver import CaptchaSolver
@@ -195,6 +199,42 @@ def no_token_api():
 
 
 @pytest.fixture(scope="function")
+def menu_api(admin_token):
+    """Menu management client with admin token injected (auto-refresh callback bound)"""
+    api = MenuApi(base_url=settings.base_url, timeout=settings.timeout)
+    api.set_token(admin_token.ensure())
+    _bind_auto_refresh(api, admin_token)
+    yield api
+
+
+@pytest.fixture(scope="function")
+def system_api(admin_token):
+    """System management client with admin token injected (auto-refresh callback bound)"""
+    api = SystemApi(base_url=settings.base_url, timeout=settings.timeout)
+    api.set_token(admin_token.ensure())
+    _bind_auto_refresh(api, admin_token)
+    yield api
+
+
+@pytest.fixture(scope="function")
+def file_api(admin_token):
+    """File upload & download client with admin token injected (auto-refresh callback bound)"""
+    api = FileApi(base_url=settings.base_url, timeout=settings.timeout)
+    api.set_token(admin_token.ensure())
+    _bind_auto_refresh(api, admin_token)
+    yield api
+
+
+@pytest.fixture(scope="function")
+def sysop_api(admin_token):
+    """Audit log (SysOperationRecord) client with admin token injected (auto-refresh callback bound)"""
+    api = SysOpApi(base_url=settings.base_url, timeout=settings.timeout)
+    api.set_token(admin_token.ensure())
+    _bind_auto_refresh(api, admin_token)
+    yield api
+
+
+@pytest.fixture(scope="function")
 def disposable_token(captcha_solver):
     """
     One-shot independent token (function-scoped; never pollutes admin_token)
@@ -337,4 +377,161 @@ def temp_authority(authority_api, db_client):
             "DELETE FROM sys_authorities WHERE authority_id = %s",
             (authority_id,),
         )
+
+
+# Business data isolation: temp menu (base menu)
+
+@pytest.fixture(scope="function")
+def temp_menu(menu_api, db_client):
+    """
+    Create a temp base menu via the real GVA addBaseMenu API; auto-delete on teardown.
+
+    Note: GVA addBaseMenu returns data={} (no menu object, no ID). To obtain the
+    real ID, we query getMenuList by the unique name and match by name field.
+    On cleanup, the sys_authorities_menus link table may not exist in some GVA
+    versions, so each DB delete is wrapped in its own try/except.
+    :return: dict with ID / name / path / component and other real fields
+    """
+    name = MenuApi.random_menu_name()
+    path = "/{}".format(name)
+    component = "view/{}"
+    resp = menu_api.add_base_menu(
+        name=name,
+        path=path,
+        component=component,
+        meta={"title": name, "icon": "el-icon-menu"},
+    )
+    if resp.json().get("code") != 0:
+        raise APIException(
+            "测试菜单创建失败: {}".format(resp.json()),
+            resp.status_code,
+            resp,
+        )
+    # addBaseMenu returns data={} in this GVA version; look up the real ID
+    # via getMenuList matching by the unique name.
+    body = resp.json()
+    menu = body.get("data", {}).get("menu") or dict(body.get("data") or {})
+    menu_id = menu.get("ID") or menu.get("id")
+    if not menu_id:
+        list_resp = menu_api.get_menu_list(page=1, page_size=500, keyword=name)
+        # GVA getMenuList may return data as a flat list OR as {list, total, page}
+        raw = list_resp.json().get("data")
+        if isinstance(raw, list):
+            items = raw
+        elif isinstance(raw, dict):
+            items = raw.get("list", []) or []
+        else:
+            items = []
+        matched = [m for m in items if m.get("name") == name]
+        if matched:
+            menu_id = matched[0].get("ID") or matched[0].get("id")
+            # Merge real DB record fields so downstream tests can use them
+            menu.update(matched[0])
+    if not menu_id:
+        raise APIException(
+            "菜单创建成功但无法解析真实 ID (GVA addBaseMenu 未返回 ID 且 getMenuList 未匹配): name={}".format(name),
+            resp.status_code,
+            resp,
+        )
+    menu["ID"] = menu_id
+    logger.info("[Fixture] 已创建临时菜单: {} (ID={})".format(name, menu_id))
+    yield menu
+    # Cleanup: try business API first; DB fallback wrapped per-table to
+    # tolerate missing sys_authorities_menus link table in some GVA versions.
+    try:
+        del_resp = menu_api.delete_base_menu(menu_id)
+        if del_resp.json().get("code") == 0:
+            logger.info("[Fixture] 已删除临时菜单: {}".format(name))
+            return
+        logger.warning("[Fixture] 业务删除菜单返回非0: {}, 用 DB 兜底".format(del_resp.json()))
+    except Exception as e:
+        logger.warning("[Fixture] 业务接口删除菜单异常, DB 兜底: {}".format(e))
+    # DB fallback: link table first (if exists), then main table
+    try:
+        db_client.execute(
+            "DELETE FROM sys_authorities_menus WHERE sys_base_menu_id = %s",
+            (menu_id,),
+        )
+    except Exception as e_link:
+        logger.warning("[Fixture] sys_authorities_menus 清理失败(表可能不存在): {}".format(e_link))
+    try:
+        db_client.execute(
+            "DELETE FROM sys_base_menus WHERE id = %s",
+            (menu_id,),
+        )
+    except Exception as e_main:
+        logger.warning("[Fixture] sys_base_menus 清理失败: {}".format(e_main))
+
+
+# Business data isolation: temp uploaded file
+
+@pytest.fixture(scope="function")
+def temp_file(file_api, db_client):
+    """
+    Upload a small text file via the real GVA upload API; auto-delete on teardown.
+
+    Note: GVA /fileUploadAndDownload/upload returns code=0 but the file object's
+    ID field is always 0 (a GVA quirk: the DB row is created but the response
+    keeps the zero-value SysFile struct). To obtain the real ID needed for
+    find/delete, we query getFileList by the unique url returned from upload.
+    """
+    content = "pytest temp file {}".format(uuid.uuid4().hex)
+    resp = file_api.upload(
+        file_bytes=content.encode("utf-8"),
+        filename="pytest_{}.txt".format(uuid.uuid4().hex[:8]),
+        content_type="text/plain",
+    )
+    try:
+        body = resp.json()
+    except Exception as e:
+        raise APIException(
+            "测试文件上传响应非合法 JSON: {}".format(e),
+            resp.status_code,
+            resp,
+        )
+    if body.get("code") != 0:
+        raise APIException(
+            "测试文件上传失败: {}".format(body),
+            resp.status_code,
+            resp,
+        )
+    file_info = body.get("data", {}).get("file") or body.get("data", {})
+    # GVA returns ID=0 in upload response; look up the real ID via getFileList.
+    # GVA getFileList keyword matches the name field, so we use the unique
+    # filename (e.g. pytest_xxxxxxxx.txt) as keyword, then verify by url match.
+    file_url = file_info.get("url") or ""
+    file_name = file_info.get("name") or ""
+    real_id = file_info.get("id") or file_info.get("ID")
+    if (not real_id or real_id == 0) and file_name:
+        list_resp = file_api.get_file_list(page=1, page_size=500, keyword=file_name)
+        items = list_resp.json().get("data", {}).get("list", []) or []
+        # Filter by url to ensure exact match (filename keyword may match partial)
+        if file_url:
+            matched = [m for m in items if m.get("url") == file_url]
+        else:
+            matched = [m for m in items if m.get("name") == file_name]
+        if matched:
+            real_id = matched[0].get("ID") or matched[0].get("id")
+            # Merge the real DB record fields into file_info so downstream tests
+            # can use file_info["ID"] / file_info["name"] / file_info["url"]
+            file_info.update(matched[0])
+    if not real_id or real_id == 0:
+        raise APIException(
+            "上传成功但无法解析真实文件 ID (GVA upload 返回 ID=0 且 getFileList 未匹配): name={} url={}".format(file_name, file_url),
+            resp.status_code,
+            resp,
+        )
+    # Normalize id field so tests can use file_info["ID"] consistently
+    file_info["ID"] = real_id
+    logger.info("[Fixture] 已上传临时文件: id={} name={}".format(real_id, file_info.get("name")))
+    yield file_info
+    # Cleanup: try business API first; skip if test already deleted the file
+    if file_info.get("ID") is None:
+        logger.info("[Fixture] 文件已被测试用例删除, 跳过清理")
+        return
+    try:
+        file_api.delete_file(real_id)
+        logger.info("[Fixture] 已删除临时文件: id={}".format(real_id))
+    except Exception as e:
+        logger.warning("[Fixture] 业务接口删除文件异常, 跳过 DB 兜底(文件不强制 DB 清理): {}".format(e))
 
