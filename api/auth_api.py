@@ -9,6 +9,8 @@ GVA auth module API wrapper
     - Get current user info /user/getUserInfo
     - Change password /user/changePassword
 """
+import os
+
 from utils.exceptions import APIException
 from utils.logger import get_logger
 from api.base_api import BaseApi
@@ -146,7 +148,7 @@ class AuthApi(BaseApi):
         return self.post("/init/checkdb", json={})
 
     def init_db(self, admin_password, db_name,
-                host="127.0.0.1", port="3306", user_name="root",
+                host=os.getenv('INIT_HOST', '127.0.0.1'), port="3306", user_name="root",
                 password="", db_type="mysql", db_path="", template=""):
         """
         Initialize GVA database (POST /init/initdb, request.InitDB schema).

@@ -259,13 +259,14 @@ jobs:
       - name: Set up environment variables
         run: |
           echo "GVA_BASE_URL=http://127.0.0.1:8888" >> $GITHUB_ENV
-          echo "DB_HOST=mysql" >> $GITHUB_ENV
+          echo "DB_HOST=127.0.0.1" >> $GITHUB_ENV
           echo "DB_PORT=3306" >> $GITHUB_ENV
           echo "DB_USER=root" >> $GITHUB_ENV
           echo "DB_PASSWORD=123456" >> $GITHUB_ENV
           echo "DB_DATABASE=gva" >> $GITHUB_ENV
           echo "ADMIN_USERNAME=admin" >> $GITHUB_ENV
           echo "ADMIN_PASSWORD=123456" >> $GITHUB_ENV
+          echo "INIT_HOST=mysql" >> $GITHUB_ENV 
 
       - name: Show resolved config
         run: |
