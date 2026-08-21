@@ -166,7 +166,7 @@ class TestInitDB:
             init_resp = api.init_db(
                 admin_password=settings.admin_account["password"],
                 db_name=db_cfg["database"],
-                host=db_cfg["host"],
+                host="",
                 port=str(db_cfg["port"]),
                 user_name=db_cfg["user"],
                 password=db_cfg["password"] or "123456",
